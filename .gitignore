@@ -35,6 +35,17 @@ logs/
 # Test reports (runtime artifacts, not source)
 docs/test-reports/
 
+# Internal development plans (not for public consumption)
+docs/superpowers/plans/
+
+# Backup files
+*.bak-*
+*.bak
+
+# Test/probe archive changes
+openspec/changes/*-test-archive/
+openspec/changes/*-test-probe/
+
 # Local probe / sandbox dirs
 /tmp-probe*/
 /tmp-wf-test*/
