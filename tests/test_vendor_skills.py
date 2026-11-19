@@ -27,10 +27,15 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 VENDOR = ROOT / "vendor" / "skills"
 
-# Windows 本机上游缓存（只读）；不存在时强校验组跳过
+import os
+
+# 上游 Superpowers 缓存（只读）；不存在时强校验组跳过。
+# 优先读环境变量 ZES_SUPERPOWERS_CACHE，否则用当前用户的 HOME 推导，
+# 避免硬编码任何本机用户名/盘符。
 SOURCE_ROOT = Path(
-    r"C:\Users\Administrator\.zcode\cli\plugins\cache"
-    r"\claude-plugins-official\superpowers\7.0.1"
+    os.environ.get("ZES_SUPERPOWERS_CACHE")
+    or Path.home() / ".zcode" / "cli" / "plugins" / "cache"
+       / "claude-plugins-official" / "superpowers" / "7.0.1"
 )
 
 ZES_NAMES = [

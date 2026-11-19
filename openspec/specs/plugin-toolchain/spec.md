@@ -3,7 +3,7 @@
 
 ## Purpose
 
-定义 zcode-expert-system 插件工具链的可用性契约：三个 CLI 入口（zcode_expert_system.py / zcode_dev_workflow.py / skill_entry.py）的 `--help` 分流、内置引擎 openspec_engine.py 的 change 枚举与 `--root` 语义、hook 账本注入跳过归档与终态账本、workflow_check 的部署布局兼容与账本歧义通知、install.js 的备份保留上限——保证工具链在源码仓与部署布局两种形态下行为一致、fail-open 不阻断会话。规格真相源：change `2026-11-18-fix-suite-defects`（2026-11-18 归档），修复依据 docs/test-reports/2026-11-18-v3.2.0-full-suite-test.md 与 2026-11-18-fix-plan.md。
+定义 zcode-expert-system 插件工具链的可用性契约：三个 CLI 入口（zcode_expert_system.py / zcode_dev_workflow.py / skill_entry.py）的 `--help` 分流、内置引擎 openspec_engine.py 的 change 枚举与 `--root` 语义、hook 账本注入跳过归档与终态账本、workflow_check 的部署布局兼容与账本歧义通知、install.js 的备份保留上限——保证工具链在源码仓与部署布局两种形态下行为一致、fail-open 不阻断会话。规格真相源：change `2026-11-18-fix-suite-defects`（2026-11-18 归档）；修复依据为该项目内部测试报告（不随仓库分发）。
 
 ## ADDED Requirements
 

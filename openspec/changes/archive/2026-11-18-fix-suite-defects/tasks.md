@@ -8,7 +8,7 @@
 
 - [x] 1. P1-1 hook 状态漂移修复——`hooks/prepend-global-rules-reminder.mjs` 的 `summaryFromSddDir` 增加 `archiveRoot` 入参；循环内两条跳过判定（statSync 取 mtime 之前）：①已归档——`openspec/changes/archive/<name>` 存在即跳过；②终态——读该 slug `progress.md` 前 60 行正则提 `Overall Status`，值为 DONE/PARKED/COMPLETE 之一即跳过，读失败按未终态（fail-open）；`activeStageSummary` 调用处传入 `archiveRoot`；全部被跳过时返回空串（保持「本层没有可用账本」语义）(covers R3)
   - 依赖：无（首批次首任务）
-  - 验收（实测）：`printf '%s' '{"prompt":"你好","cwd":"E:/zcode-expert-system"}' | node hooks/prepend-global-rules-reminder.mjs` → `additionalContext` 仅含全局规则 REMINDER，**无**「账本: 2026-11-17-fix-audit-defects · 阶段: S8 · 状态: DONE」过期注入（修复前每轮恒注入）；rc=0（fail-open 契约保持，不阻断会话）
+  - 验收（实测）：`printf '%s' '{"prompt":"你好","cwd":"<repo-root>"}' | node hooks/prepend-global-rules-reminder.mjs` → `additionalContext` 仅含全局规则 REMINDER，**无**「账本: 2026-11-17-fix-audit-defects · 阶段: S8 · 状态: DONE」过期注入（修复前每轮恒注入）；rc=0（fail-open 契约保持，不阻断会话）
 - [x] 2. P1-2 幻影变更修复——`scripts/openspec_engine.py` 的 `cmd_list_changes` 循环体在 `is_dir()` 判定后跳过名为 `archive` 的目录（对齐官方 openspec 1.16.1 `view.js:80` 口径：archive/ 是归档容器而非 pending 变更）(covers R2)
   - 依赖：无（与任务 3 同文件但改动独立：循环体 vs argparse）
   - 验收（实测）：`python scripts/openspec_engine.py list` → `changes` 仅含活跃变更 `['fix-suite-defects']`，**无** `{"name":"archive","status":"pending"}` 幻影项
@@ -23,7 +23,7 @@
   - 验收（实测）：部署副本（插件缓存 3.2.0）`python .../skills/zcode-expert-system/scripts/workflow_check.py --self-check` → 「配置自检 [ OK ] 配置与代码一致；结论：无漂移」**rc=0**（修复前部署侧恒报 8 处 `[DRIFT]` rc=2）；源码仓同命令保持 rc=0（internal 本身存在不走备用）
 - [x] 5. P3-3 ledger_ambiguous 死字段修复——`scripts/workflow_check.py` 的 `run()` 在 `rep = Report()` 之后消费 `ctx["ledger_ambiguous"]`：非空时输出 `S0.LEDGER_AMBIGUOUS` WARN（`reason="soft:ledger_ambiguous"`——`soft:` 为 WARN 唯一合法前缀，`enforce_reasons()` 机械执法，见 design.md D4；人读文本含 `[warn:ledger_ambiguous]` 标记）(covers R4)
   - 依赖：无
-  - 验收（实测）：`python scripts/workflow_check.py --scale readonly --root E:/zcode-expert-system`（sdd 下 3 个含 progress.md 账本）→ 输出「[WARN] 账本唯一性 —— [warn:ledger_ambiguous] 多条候选：2026-11-17-fix-audit-defects, 2026-11-17-openspec-impl, 2026-11-17-vendor-skills —— 多个 progress.md 候选，未做规模与账本交叉校验」；rc=0（WARN 不致失败，仅补通知）；单账本场景不触发
+  - 验收（实测）：`python scripts/workflow_check.py --scale readonly --root <repo-root>`（sdd 下 3 个含 progress.md 账本）→ 输出「[WARN] 账本唯一性 —— [warn:ledger_ambiguous] 多条候选：2026-11-17-fix-audit-defects, 2026-11-17-openspec-impl, 2026-11-17-vendor-skills —— 多个 progress.md 候选，未做规模与账本交叉校验」；rc=0（WARN 不致失败，仅补通知）；单账本场景不触发
 
 ## 批次 C（P2-2 / P2-3 / P3-4 / P3-1 / P3-5）
 
