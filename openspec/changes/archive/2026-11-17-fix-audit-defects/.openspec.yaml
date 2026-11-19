@@ -1,0 +1,6 @@
+schema: spec-driven
+name: fix-audit-defects
+created: 2026-11-17
+status: pending
+requires: proposal,design,tasks,specs
+applyRequires: proposal,design,tasks,specs

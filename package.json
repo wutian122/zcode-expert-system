@@ -1,0 +1,54 @@
+{
+  "name": "zcode-expert-system",
+  "version": "3.2.1",
+  "description": "ZCode Expert System v3.2 - 331 experts in 32 categories with two-axis routing (scale -> nine-stage workflow, domain -> expert). OpenSpec + Superpowers + multi-agent + TDD fusion.",
+  "main": "bin/cli.js",
+  "bin": {
+    "zcode-expert-system": "bin/cli.js"
+  },
+  "scripts": {
+    "deploy": "node scripts/install.js",
+    "deploy:dry": "node scripts/install.js --dry-run",
+    "uninstall": "node scripts/install.js --uninstall"
+  },
+  "keywords": [
+    "zcode",
+    "plugin",
+    "expert-system",
+    "ai",
+    "agent",
+    "dsh-agency-agents"
+  ],
+  "author": "wutian122",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wutian122/zcode-expert-system.git"
+  },
+  "files": [
+    ".zcode-plugin/",
+    "scripts/install.js",
+    "scripts/openspec_engine.py",
+    "scripts/workflow_check.py",
+    "scripts/llm_client.py",
+    "scripts/embedding_client.py",
+    "vendor/",
+    "scripts/sdd/",
+    "config/",
+    "agents/",
+    "references/",
+    "templates/",
+    "commands/",
+    "docs/workflow-fusion-design.md",
+    "context/context-manager.py",
+    "SKILL.md",
+    "zcode_expert_system.py",
+    "zcode_dev_workflow.py",
+    "skill_entry.py",
+    "README.md",
+    "README_CN.md",
+    "LICENSE",
+    "bin/",
+    "hooks/"
+  ]
+}

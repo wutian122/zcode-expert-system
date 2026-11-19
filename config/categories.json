@@ -1,0 +1,557 @@
+{
+  "frontend-client": {
+    "name": "前端与客户端",
+    "manager": "manager-frontend-client",
+    "expert_count": 8,
+    "expert_ids": [
+      "expert-engineering-desktop-app-engineer",
+      "expert-engineering-frontend-developer",
+      "expert-engineering-i18n-engineer",
+      "expert-engineering-mobile-app-builder",
+      "expert-engineering-mobile-release-engineer",
+      "expert-engineering-senior-developer",
+      "expert-engineering-webassembly-engineer",
+      "expert-engineering-wechat-mini-program-developer"
+    ]
+  },
+  "backend-architecture": {
+    "name": "后端与架构",
+    "manager": "manager-backend-architecture",
+    "expert_count": 18,
+    "expert_ids": [
+      "expert-engineering-api-platform-engineer",
+      "expert-engineering-backend-architect",
+      "expert-engineering-cms-developer",
+      "expert-engineering-dingtalk-integration-developer",
+      "expert-engineering-drupal-performance",
+      "expert-engineering-drupal-shopping-cart",
+      "expert-engineering-feishu-integration-developer",
+      "expert-engineering-filament-optimization-specialist",
+      "expert-engineering-mechanical-design-engineer",
+      "expert-engineering-orgscript-engineer",
+      "expert-engineering-payments-billing-engineer",
+      "expert-engineering-platform-engineer",
+      "expert-engineering-rapid-prototyper",
+      "expert-engineering-servicenow-developer-mentor",
+      "expert-engineering-software-architect",
+      "expert-engineering-video-streaming-engineer",
+      "expert-engineering-wordpress-performance",
+      "expert-engineering-wordpress-shopping-cart"
+    ]
+  },
+  "data-database": {
+    "name": "数据与数据库",
+    "manager": "manager-data-database",
+    "expert_count": 8,
+    "expert_ids": [
+      "expert-engineering-ai-data-remediation-engineer",
+      "expert-engineering-data-engineer",
+      "expert-engineering-data-visualization-engineer",
+      "expert-engineering-database-optimizer",
+      "expert-engineering-database-reliability-engineer",
+      "expert-engineering-gaussdb-expert",
+      "expert-engineering-knowledge-graph-engineer",
+      "expert-engineering-search-relevance-engineer"
+    ]
+  },
+  "devops-operations": {
+    "name": "DevOps 与运维",
+    "manager": "manager-devops-operations",
+    "expert_count": 7,
+    "expert_ids": [
+      "expert-engineering-autonomous-optimization-architect",
+      "expert-engineering-devops-automator",
+      "expert-engineering-finops-engineer",
+      "expert-engineering-incident-response-commander",
+      "expert-engineering-it-service-manager",
+      "expert-engineering-sre",
+      "expert-specialized-developer-advocate"
+    ]
+  },
+  "ai-llm": {
+    "name": "AI 与大模型",
+    "manager": "manager-ai-llm",
+    "expert_count": 9,
+    "expert_ids": [
+      "expert-engineering-ai-engineer",
+      "expert-engineering-email-intelligence-engineer",
+      "expert-engineering-llm-post-training-engineer",
+      "expert-engineering-multi-agent-systems-architect",
+      "expert-engineering-prompt-engineer",
+      "expert-engineering-rag-pipeline-engineer",
+      "expert-engineering-realtime-collaboration-engineer",
+      "expert-engineering-voice-ai-integration-engineer",
+      "expert-prompt-engineer"
+    ]
+  },
+  "embedded-iot": {
+    "name": "嵌入式与物联网",
+    "manager": "manager-embedded-iot",
+    "expert_count": 6,
+    "expert_ids": [
+      "expert-engineering-embedded-firmware-engineer",
+      "expert-engineering-embedded-linux-driver-engineer",
+      "expert-engineering-fpga-digital-design-engineer",
+      "expert-engineering-iot-fleet-engineer",
+      "expert-engineering-iot-solution-architect",
+      "expert-engineering-pc-host-engineer"
+    ]
+  },
+  "network-engineering": {
+    "name": "网络工程",
+    "manager": "manager-network-engineering",
+    "expert_count": 3,
+    "expert_ids": [
+      "expert-engineering-china-network-engineer",
+      "expert-engineering-network-engineer-china",
+      "expert-engineering-network-engineer"
+    ]
+  },
+  "engineering-quality": {
+    "name": "工程效能与质量",
+    "manager": "manager-engineering-quality",
+    "expert_count": 10,
+    "expert_ids": [
+      "expert-engineering-code-reviewer",
+      "expert-engineering-codebase-onboarding-engineer",
+      "expert-engineering-developer-tooling-engineer",
+      "expert-engineering-git-workflow-master",
+      "expert-engineering-minimal-change-engineer",
+      "expert-engineering-rust-refactoring-specialist",
+      "expert-engineering-technical-writer",
+      "expert-lsp-index-engineer",
+      "expert-specialized-civil-engineer",
+      "expert-specialized-codebase-archaeologist"
+    ]
+  },
+  "security-compliance": {
+    "name": "安全与合规技术",
+    "manager": "manager-security-compliance",
+    "expert_count": 19,
+    "expert_ids": [
+      "expert-engineering-identity-access-engineer",
+      "expert-engineering-privacy-engineer",
+      "expert-engineering-security-engineer",
+      "expert-engineering-solidity-smart-contract-engineer",
+      "expert-engineering-threat-detection-engineer",
+      "expert-security-ai-generated-code-auditor",
+      "expert-security-appsec-engineer",
+      "expert-security-architect",
+      "expert-security-blockchain-security-auditor",
+      "expert-security-cloud-security-architect",
+      "expert-security-compliance-auditor",
+      "expert-security-incident-responder",
+      "expert-security-penetration-tester",
+      "expert-security-secrets-credential-engineer",
+      "expert-security-senior-secops",
+      "expert-security-threat-detection-engineer",
+      "expert-security-threat-intelligence-analyst",
+      "expert-specialized-ai-policy-writer",
+      "expert-specialized-fedramp-rmf-compliance"
+    ]
+  },
+  "data-testing": {
+    "name": "数据与测试",
+    "manager": "manager-data-testing",
+    "expert_count": 15,
+    "expert_ids": [
+      "expert-engineering-ats-validator-architect",
+      "expert-engineering-pdf-engine-architect",
+      "expert-engineering-universal-document-compiler",
+      "expert-specialized-document-generator",
+      "expert-specialized-model-qa",
+      "expert-testing-accessibility-auditor",
+      "expert-testing-api-tester",
+      "expert-testing-embedded-qa-engineer",
+      "expert-testing-evidence-collector",
+      "expert-testing-performance-benchmarker",
+      "expert-testing-reality-checker",
+      "expert-testing-test-automation-engineer",
+      "expert-testing-test-results-analyzer",
+      "expert-testing-tool-evaluator",
+      "expert-testing-workflow-optimizer"
+    ]
+  },
+  "design-creative": {
+    "name": "设计与创意",
+    "manager": "manager-design-creative",
+    "expert_count": 14,
+    "expert_ids": [
+      "expert-design-brand-guardian",
+      "expert-design-image-prompt-engineer",
+      "expert-design-inclusive-visuals-specialist",
+      "expert-design-persona-walkthrough",
+      "expert-design-ui-designer",
+      "expert-design-ui-finish-gate-reviewer",
+      "expert-design-ux-architect",
+      "expert-design-ux-researcher",
+      "expert-design-video-prompt-engineer",
+      "expert-design-visual-storyteller",
+      "expert-design-whimsy-injector",
+      "expert-engineering-section-508-specialist",
+      "expert-engineering-uswds-developer",
+      "expert-specialized-focus-music-architect"
+    ]
+  },
+  "marketing-growth": {
+    "name": "营销与增长",
+    "manager": "manager-marketing-growth",
+    "expert_count": 45,
+    "expert_ids": [
+      "expert-marketing-aeo-foundations",
+      "expert-marketing-agentic-search-optimizer",
+      "expert-marketing-ai-citation-strategist",
+      "expert-marketing-app-store-optimizer",
+      "expert-marketing-baidu-seo-specialist",
+      "expert-marketing-bilibili-content-strategist",
+      "expert-marketing-bilibili-strategist",
+      "expert-marketing-book-co-author",
+      "expert-marketing-carousel-growth-engine",
+      "expert-marketing-china-ecommerce-operator",
+      "expert-marketing-china-market-localization-strategist",
+      "expert-marketing-content-creator",
+      "expert-marketing-cross-border-ecommerce",
+      "expert-marketing-daily-news-briefing",
+      "expert-marketing-developer-community-builder",
+      "expert-marketing-douyin-strategist",
+      "expert-marketing-ecommerce-operator",
+      "expert-marketing-email-strategist",
+      "expert-marketing-global-podcast-strategist",
+      "expert-marketing-growth-hacker",
+      "expert-marketing-instagram-curator",
+      "expert-marketing-knowledge-commerce-strategist",
+      "expert-marketing-kuaishou-strategist",
+      "expert-marketing-linkedin-content-creator",
+      "expert-marketing-livestream-commerce-coach",
+      "expert-marketing-multi-platform-publisher",
+      "expert-marketing-podcast-strategist",
+      "expert-marketing-pr-communications-manager",
+      "expert-marketing-private-domain-operator",
+      "expert-marketing-reddit-community-builder",
+      "expert-marketing-search-growth-orchestrator",
+      "expert-marketing-seo-specialist",
+      "expert-marketing-short-video-editing-coach",
+      "expert-marketing-social-media-strategist",
+      "expert-marketing-tiktok-strategist",
+      "expert-marketing-twitter-engager",
+      "expert-marketing-video-optimization-specialist",
+      "expert-marketing-wechat-official-account",
+      "expert-marketing-wechat-operator",
+      "expert-marketing-weibo-strategist",
+      "expert-marketing-weixin-channels-strategist",
+      "expert-marketing-x-twitter-intelligence-analyst",
+      "expert-marketing-xiaohongshu-operator",
+      "expert-marketing-xiaohongshu-specialist",
+      "expert-marketing-zhihu-strategist"
+    ]
+  },
+  "paid-media": {
+    "name": "付费媒体",
+    "manager": "manager-paid-media",
+    "expert_count": 7,
+    "expert_ids": [
+      "expert-paid-media-auditor",
+      "expert-paid-media-creative-strategist",
+      "expert-paid-media-paid-social-strategist",
+      "expert-paid-media-ppc-strategist",
+      "expert-paid-media-programmatic-buyer",
+      "expert-paid-media-search-query-analyst",
+      "expert-paid-media-tracking-specialist"
+    ]
+  },
+  "sales-customer": {
+    "name": "销售与客户",
+    "manager": "manager-sales-customer",
+    "expert_count": 10,
+    "expert_ids": [
+      "expert-sales-account-strategist",
+      "expert-sales-coach",
+      "expert-sales-deal-strategist",
+      "expert-sales-discovery-coach",
+      "expert-sales-engineer",
+      "expert-sales-offer-lead-gen-strategist",
+      "expert-sales-outbound-strategist",
+      "expert-sales-pipeline-analyst",
+      "expert-sales-proposal-strategist",
+      "expert-sales-outreach"
+    ]
+  },
+  "business-strategy": {
+    "name": "商业经营与战略",
+    "manager": "manager-business-strategy",
+    "expert_count": 18,
+    "expert_ids": [
+      "expert-chief-executive-officer",
+      "expert-chief-marketing-officer",
+      "expert-chief-of-staff",
+      "expert-chief-operating-officer",
+      "expert-chief-product-officer",
+      "expert-chief-technology-officer",
+      "expert-business-strategist",
+      "expert-change-management-consultant",
+      "expert-esg-sustainability-officer",
+      "expert-ma-integration-manager",
+      "expert-operations-manager",
+      "expert-specialized-chief-of-staff",
+      "expert-specialized-cultural-intelligence-strategist",
+      "expert-specialized-french-consulting-market",
+      "expert-specialized-korean-business-navigator",
+      "expert-specialized-master-plan-architect",
+      "expert-specialized-risk-assessor",
+      "expert-specialized-salesforce-architect"
+    ]
+  },
+  "healthcare": {
+    "name": "医疗健康",
+    "manager": "manager-healthcare",
+    "expert_count": 7,
+    "expert_ids": [
+      "expert-healthcare-clinical-evidence-agent",
+      "expert-healthcare-innovation-strategist",
+      "expert-healthcare-sovereign-health-systems-agent",
+      "expert-healthcare-aging-parent-care-companion",
+      "expert-healthcare-customer-service",
+      "expert-healthcare-marketing-compliance",
+      "expert-medical-billing-coding-specialist"
+    ]
+  },
+  "supply-chain": {
+    "name": "供应链与物流",
+    "manager": "manager-supply-chain",
+    "expert_count": 5,
+    "expert_ids": [
+      "expert-supply-chain-strategist",
+      "expert-supply-chain-garment-factory-planning-engineer",
+      "expert-supply-chain-inventory-forecaster",
+      "expert-supply-chain-route-optimizer",
+      "expert-supply-chain-vendor-evaluator"
+    ]
+  },
+  "legal-compliance": {
+    "name": "法务与合规",
+    "manager": "manager-legal-compliance",
+    "expert_count": 6,
+    "expert_ids": [
+      "expert-legal-contract-reviewer",
+      "expert-legal-policy-writer",
+      "expert-data-privacy-officer",
+      "expert-legal-billing-time-tracking",
+      "expert-legal-client-intake",
+      "expert-legal-document-review"
+    ]
+  },
+  "hr": {
+    "name": "人力资源",
+    "manager": "manager-hr",
+    "expert_count": 7,
+    "expert_ids": [
+      "expert-hr-performance-reviewer",
+      "expert-hr-recruiter",
+      "expert-corporate-training-designer",
+      "expert-hr-onboarding",
+      "expert-organizational-psychologist",
+      "expert-recruitment-specialist",
+      "expert-resume-tailor"
+    ]
+  },
+  "finance-tax": {
+    "name": "财务与税务",
+    "manager": "manager-finance-tax",
+    "expert_count": 14,
+    "expert_ids": [
+      "expert-finance-bookkeeper-controller",
+      "expert-finance-financial-analyst",
+      "expert-finance-financial-forecaster",
+      "expert-finance-fpa-analyst",
+      "expert-finance-fraud-detector",
+      "expert-finance-hk-stock-compliance-reviewer",
+      "expert-finance-investment-researcher",
+      "expert-finance-invoice-manager",
+      "expert-finance-tax-strategist",
+      "expert-accounts-payable-agent",
+      "expert-chief-financial-officer",
+      "expert-loan-officer-assistant",
+      "expert-specialized-pricing-analyst",
+      "expert-specialized-pricing-optimizer"
+    ]
+  },
+  "academic-research": {
+    "name": "学术与研究",
+    "manager": "manager-academic-research",
+    "expert_count": 10,
+    "expert_ids": [
+      "expert-academic-anthropologist",
+      "expert-academic-geographer",
+      "expert-academic-historian",
+      "expert-academic-narratologist",
+      "expert-academic-psychologist",
+      "expert-academic-statistician",
+      "expert-academic-study-planner",
+      "expert-gaokao-college-advisor",
+      "expert-grant-writer",
+      "expert-study-abroad-advisor"
+    ]
+  },
+  "government-public": {
+    "name": "政企与公共服务",
+    "manager": "manager-government-public",
+    "expert_count": 1,
+    "expert_ids": [
+      "expert-government-digital-presales-consultant"
+    ]
+  },
+  "business-support": {
+    "name": "商业支持与专业服务",
+    "manager": "manager-business-support",
+    "expert_count": 6,
+    "expert_ids": [
+      "expert-authenticity-appraiser",
+      "expert-hospitality-guest-services",
+      "expert-livestock-archive-auditor",
+      "expert-personal-growth-mentor",
+      "expert-real-estate-buyer-seller",
+      "expert-travel-planner"
+    ]
+  },
+  "data-knowledge": {
+    "name": "学术与知识服务",
+    "manager": "manager-data-knowledge",
+    "expert_count": 2,
+    "expert_ids": [
+      "expert-research-synthesist",
+      "expert-zk-steward"
+    ]
+  },
+  "game-dev": {
+    "name": "游戏开发",
+    "manager": "manager-game-dev",
+    "expert_count": 21,
+    "expert_ids": [
+      "expert-blender-addon-engineer",
+      "expert-economy-designer",
+      "expert-game-audio-engineer",
+      "expert-game-designer",
+      "expert-godot-gameplay-scripter",
+      "expert-godot-multiplayer-engineer",
+      "expert-godot-shader-developer",
+      "expert-level-designer",
+      "expert-narrative-designer",
+      "expert-roblox-avatar-creator",
+      "expert-roblox-experience-designer",
+      "expert-roblox-systems-scripter",
+      "expert-technical-artist",
+      "expert-unity-architect",
+      "expert-unity-editor-tool-developer",
+      "expert-unity-multiplayer-engineer",
+      "expert-unity-shader-graph-artist",
+      "expert-unreal-multiplayer-architect",
+      "expert-unreal-systems-engineer",
+      "expert-unreal-technical-artist",
+      "expert-unreal-world-builder"
+    ]
+  },
+  "spatial-computing": {
+    "name": "空间计算与 XR",
+    "manager": "manager-spatial-computing",
+    "expert_count": 6,
+    "expert_ids": [
+      "expert-macos-spatial-metal-engineer",
+      "expert-terminal-integration-specialist",
+      "expert-visionos-spatial-engineer",
+      "expert-xr-cockpit-interaction-specialist",
+      "expert-xr-immersive-developer",
+      "expert-xr-interface-architect"
+    ]
+  },
+  "gis": {
+    "name": "地理信息系统",
+    "manager": "manager-gis",
+    "expert_count": 13,
+    "expert_ids": [
+      "expert-gis-3d-scene-developer",
+      "expert-gis-analyst",
+      "expert-gis-bim-specialist",
+      "expert-gis-cartography-designer",
+      "expert-gis-drone-reality-mapping",
+      "expert-gis-geoai-ml-engineer",
+      "expert-gis-geoprocessing-specialist",
+      "expert-gis-qa-engineer",
+      "expert-gis-solution-engineer",
+      "expert-gis-spatial-data-engineer",
+      "expert-gis-spatial-data-scientist",
+      "expert-gis-technical-consultant",
+      "expert-gis-web-gis-developer"
+    ]
+  },
+  "project-management": {
+    "name": "项目管理",
+    "manager": "manager-project-management",
+    "expert_count": 9,
+    "expert_ids": [
+      "expert-project-management-experiment-tracker",
+      "expert-project-management-jira-workflow-steward",
+      "expert-project-management-meeting-notes-specialist",
+      "expert-project-management-project-shepherd",
+      "expert-project-management-studio-operations",
+      "expert-project-management-studio-producer",
+      "expert-project-manager-senior",
+      "expert-specialized-meeting-assistant",
+      "expert-specialized-workflow-architect"
+    ]
+  },
+  "product-management": {
+    "name": "产品管理",
+    "manager": "manager-product-management",
+    "expert_count": 6,
+    "expert_ids": [
+      "expert-product-behavioral-nudge-engine",
+      "expert-product-dx-engineer",
+      "expert-product-feedback-synthesizer",
+      "expert-product-manager",
+      "expert-product-sprint-prioritizer",
+      "expert-product-trend-researcher"
+    ]
+  },
+  "customer-support": {
+    "name": "客户支持",
+    "manager": "manager-customer-support",
+    "expert_count": 10,
+    "expert_ids": [
+      "expert-customer-service",
+      "expert-customer-success-manager",
+      "expert-retail-customer-returns",
+      "expert-support-analytics-reporter",
+      "expert-support-executive-summary-generator",
+      "expert-support-finance-tracker",
+      "expert-support-infrastructure-maintainer",
+      "expert-support-legal-compliance-checker",
+      "expert-support-recruitment-specialist",
+      "expert-support-support-responder"
+    ]
+  },
+  "language-translation": {
+    "name": "语言与跨文化",
+    "manager": "manager-language-translation",
+    "expert_count": 2,
+    "expert_ids": [
+      "expert-language-translator",
+      "expert-technical-translator-agent"
+    ]
+  },
+  "agent-governance": {
+    "name": "身份与智能体治理",
+    "manager": "manager-agent-governance",
+    "expert_count": 9,
+    "expert_ids": [
+      "expert-agentic-identity-trust",
+      "expert-agents-orchestrator",
+      "expert-automation-governance-architect",
+      "expert-data-consolidation-agent",
+      "expert-identity-graph-operator",
+      "expert-report-distribution-agent",
+      "expert-sales-data-extraction-agent",
+      "expert-specialized-mcp-builder",
+      "expert-specialized-strategy-duel-agent"
+    ]
+  }
+}

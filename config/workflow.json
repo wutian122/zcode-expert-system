@@ -1,0 +1,847 @@
+{
+  "$comment": "唯一声明源：九阶段的产物、门禁、证据级别只在此声明一次。SKILL.md / commands / workflow_check.py 三处消费，禁止各自手写。修改本文件即修改工作流定义。",
+  "version": "3.2.1",
+  "components": {
+    "openspec": "规格真相源（应该做什么）",
+    "superpowers": "工程纪律（按什么纪律做）",
+    "multi_agent": "执行主体（谁做、谁审）",
+    "tdd": "行为证明（是否被证明过）",
+    "git": "可选增强层：有 git 用 commit 追溯，无 git 用文件快照"
+  },
+  "scale": {
+    "$comment": "规模轴：决定阶段裁剪。判据优先看架构影响，文件数仅辅助。",
+    "readonly": {
+      "label": "只读",
+      "criteria": "请求不含改/加/创建/修复，无写动作",
+      "max_files": 0
+    },
+    "light": {
+      "label": "轻量",
+      "criteria": "单文件或小范围修改、配置/文案调整，不涉及新增模块",
+      "max_files": 3
+    },
+    "medium": {
+      "label": "中任务",
+      "criteria": "多文件、新功能、边界清晰的重构",
+      "min_files": 4,
+      "max_files": 15
+    },
+    "large": {
+      "label": "大任务",
+      "criteria": "跨模块、架构/数据模型变更、>15 文件或公共 API 变更",
+      "min_files": 16
+    },
+    "bug": {
+      "label": "Bug 修复",
+      "criteria": "已有功能异常或行为不符合预期",
+      "overrides_scale": true,
+      "note": "Bug 优先于规模判定，走横切支路"
+    }
+  },
+  "stages": [
+    {
+      "id": "S0",
+      "name": "需求接收与任务分诊",
+      "short": "需求分诊",
+      "role": "orchestrator",
+      "components": [],
+      "artifacts": [],
+      "ledger_section": "## Triage",
+      "gate": "G0",
+      "evidence_level": "P4",
+      "exit_criteria": [
+        "分类结论已在会话内说出口",
+        "主要影响范围已识别",
+        "无阻塞性歧义",
+        "git / openspec root 状态已探测并按分支分流",
+        "域路由已完成并说出口（category + 专家名）"
+      ],
+      "fail_return": "S0"
+    },
+    {
+      "id": "S1",
+      "name": "需求澄清与方案设计",
+      "short": "设计",
+      "role": "orchestrator",
+      "components": [
+        "superpowers:brainstorming"
+      ],
+      "artifacts": [],
+      "artifacts_note": "设计只在对话内分节展示与批准，不落盘（design.md 在 S2 生成）",
+      "gate": "G1",
+      "stop_for_owner": true,
+      "evidence_level": null,
+      "exit_criteria": [
+        "老板明确批准（yes）",
+        "2-3 方案对比 + 推荐理由",
+        "验收标准已成文",
+        "明确不包含什么",
+        "docs/superpowers/specs/ 无本次新增文件"
+      ],
+      "fail_return": "S1"
+    },
+    {
+      "id": "S2",
+      "name": "OpenSpec 规格规划",
+      "short": "规格",
+      "role": "orchestrator",
+        "components": [
+            "zes-openspec-propose",
+            "zes-openspec-update-change"
+        ],
+      "artifacts": [
+        {
+          "path": "openspec/changes/<change>/proposal.md",
+          "producer": "zes-openspec-propose",
+          "required": true
+        },
+        {
+          "path": "openspec/changes/<change>/design.md",
+          "producer": "zes-openspec-propose",
+          "required": true
+        },
+        {
+          "path": "openspec/changes/<change>/tasks.md",
+          "producer": "zes-openspec-propose",
+          "required": true
+        },
+        {
+          "path": "openspec/changes/<change>/specs/<capability>/spec.md",
+          "producer": "zes-openspec-propose",
+          "required": true,
+          "glob": true
+        },
+        {
+          "path": "openspec/changes/<change>/.openspec.yaml",
+          "producer": "openspec_engine.py",
+          "required": true
+        }
+      ],
+      "gate": "G2",
+      "stop_for_owner": true,
+      "evidence_level": "P2",
+      "exit_criteria": [
+        "openspec status --change 的 applyRequires 及沿 requires 边可达产物全 done/skipped",
+        "七项规格审查通过",
+        "老板已完成产物审阅",
+        "未在同一响应内开始实施（Planning boundary）"
+      ],
+      "fail_return": "S2"
+    },
+    {
+      "id": "S3",
+      "name": "实施计划制定",
+      "short": "计划",
+      "role": "orchestrator",
+      "components": [
+        "superpowers:writing-plans"
+      ],
+      "artifacts": [
+        {
+          "path": "docs/superpowers/plans/<date>-<feature>.md",
+          "producer": "writing-plans",
+          "required": true
+        }
+      ],
+      "required_sections": [
+        "Goal",
+        "Architecture",
+        "Tech Stack",
+        "Spec",
+        "Review Focus",
+        "Global Constraints",
+        "Dependencies",
+        "File Scope"
+      ],
+      "gate": "G3",
+      "evidence_level": "P3",
+      "exit_criteria": [
+        "任务标题严格匹配 '### Task N:'",
+        "每个 tasks.md 条目有 Task 承接（或标 covers 列表）",
+        "无占位符（TBD/TODO/适当的错误处理/同 Task N）",
+        "Self-Review 清单全过",
+        "执行模式已声明（sdd | apply-change）"
+      ],
+      "fail_return": "S2"
+    },
+    {
+      "id": "S4",
+      "name": "环境准备与基线测试",
+      "short": "环境",
+      "role": "orchestrator",
+      "components": [
+        "baseline-test"
+      ],
+      "artifacts": [
+        {
+          "path": ".superpowers/sdd/<plan>/.gitignore",
+          "producer": "sdd-workspace",
+          "required": false
+        },
+        {
+          "path": ".superpowers/sdd/<plan>/progress.md",
+          "producer": "orchestrator",
+          "required": true,
+          "first_line": "# SDD ledger — plan:"
+        }
+      ],
+      "worktree_note": "老板决策不使用 Git Worktree。并行实施能力取消，仅保留只读调查并行与审查并行。",
+      "gate": "G4",
+      "evidence_level": "P3+P4",
+      "exit_criteria": [
+        "基线测试命令 + 退出码 + 通过数/失败数已记录",
+        "基线失败清单已落盘（若有失败）",
+        "基线主副本已写入计划文档 ## Baseline 段（防 workspace 删除后丢失）",
+        "ledger 首行为账本身份"
+      ],
+      "fail_return": "S4",
+      "stop_for_owner_when": "基线测试有失败且老板未表态是否带病开工"
+    },
+    {
+      "id": "S5",
+      "name": "代码实施与多 Agent 协作",
+      "short": "实施",
+      "role": "implementer",
+        "components": [
+            "superpowers:subagent-driven-development",
+            "superpowers:test-driven-development",
+            "zes-openspec-apply-change"
+        ],
+      "artifacts": [
+        {
+          "path": ".superpowers/sdd/<plan>/task-<N>-brief.md",
+          "producer": "task-brief",
+          "required": true
+        },
+        {
+          "path": ".superpowers/sdd/<plan>/task-<N>-report.md",
+          "producer": "implementer",
+          "required": true
+        },
+        {
+          "path": ".superpowers/sdd/<plan>/snapshot-before-<N>.json",
+          "producer": "orchestrator",
+          "required": false,
+          "when": "no_git",
+          "$required_note": "降级为非必需：全仓无 sha256 实现、无落盘指令，检查它等于查一个从不产生的东西。若将来把快照计算固化为脚本并给 orchestrator 补落盘指令，再把 required 改回 true。"
+        },
+        {
+          "path": ".superpowers/sdd/<plan>/snapshot-after-<N>.json",
+          "producer": "orchestrator",
+          "required": false,
+          "when": "no_git",
+          "$required_note": "同上"
+        }
+      ],
+      "gate": "G5",
+      "evidence_level": "P4->P2",
+      "per_task": true,
+      "exit_criteria": [
+        "brief + report + 变更集（快照差集或 diff）三件齐备",
+        "审查双结论齐备（spec 符合性 + 代码质量）",
+        "ledger 有 Task N 完成行",
+        "tasks.md 对应条目已勾选（原子回写）",
+        "每条偏离记 Ruling"
+      ],
+      "fail_return": "S5",
+      "max_fix_rounds": 5
+    },
+    {
+      "id": "S6",
+      "name": "验证审查",
+      "short": "验证审查",
+      "role": "reviewer",
+      "components": [
+        "superpowers:verification-before-completion",
+        "superpowers:requesting-code-review",
+        "superpowers:receiving-code-review"
+      ],
+      "artifacts": [
+        {
+          "path": ".superpowers/sdd/<plan>/review-<range>.diff",
+          "producer": "review-package",
+          "required": false,
+          "when": "git"
+        },
+        {
+          "path": ".superpowers/sdd/<plan>/review-<N>.md",
+          "producer": "reviewer",
+          "required": true
+        }
+      ],
+      "gate": "G6+G7",
+      "evidence_level": "P3",
+      "exit_criteria": [
+        "五层验证按任务属性全过",
+        "verification 门函数 5 步已在本会话执行",
+        "审查独立性已标记 L0/L1/L2（L2 禁止交付）",
+        "Rulings 全量清单已生成并写入计划文档 ## Rulings 段",
+        "Critical/Important 已修或已裁决"
+      ],
+      "fail_return": "S5"
+    },
+    {
+      "id": "S7",
+      "name": "交付与集成",
+      "short": "交付",
+      "role": "orchestrator",
+      "components": [
+        "superpowers:finishing-a-development-branch"
+      ],
+      "artifacts": [
+        {
+          "path": "docs/superpowers/plans/<plan>#Integration Verification",
+          "producer": "orchestrator",
+          "required": true,
+          "section": true
+        }
+      ],
+      "gate": "G8a",
+      "stop_for_owner": true,
+      "evidence_level": "P3",
+      "exit_criteria": [
+        "集成/交付后全量测试已在目标树重跑并见绿（不得沿用旧结果）",
+        "交付方式由老板选定",
+        "重测命令与退出码已写入 ## Integration Verification"
+      ],
+      "fail_return": "S5"
+    },
+    {
+      "id": "S8",
+      "name": "规格同步与归档",
+      "short": "归档",
+      "role": "orchestrator",
+        "components": [
+            "zes-openspec-sync-specs",
+            "zes-openspec-archive-change"
+        ],
+      "artifacts": [
+        {
+          "path": "openspec/specs/<capability>/spec.md",
+          "producer": "zes-openspec-sync-specs",
+          "required": true,
+          "glob": true
+        },
+        {
+          "path": "openspec/changes/archive/<date>-<change>/",
+          "producer": "zes-openspec-archive-change",
+          "required": true
+        }
+      ],
+      "gate": "G8b",
+      "stop_for_owner": true,
+      "evidence_level": "P2",
+      "exit_criteria": [
+        "delta 唯一来源 = artifactPaths.specs.existingOutputPaths",
+        "主 spec 合并后 openspec validate --specs 通过",
+        "completedTasks == totalTasks（只认 x/X）",
+        "归档日期不叠",
+        "openspec/ 下无未提交制品"
+      ],
+      "fail_return": "S8"
+    }
+  ],
+  "component_registry": {
+    "$comment": "组件登记表。internal=插件内权威路径（相对插件根）；external=可选外部等价物（真实技能名/CLI）；required=缺失是否阻断（仅 sdd 与 baseline-test 为 true）。共 14 项（含 baseline-test）。",
+    "superpowers:brainstorming": {
+      "kind": "method",
+      "internal": "vendor/skills/zes-brainstorming/SKILL.md",
+      "external": "superpowers:brainstorming",
+      "required": false,
+      "override": "上游默认落盘 docs/superpowers/specs/（brainstorming/SKILL.md:225）；本体系 R3/W2 禁止，S1 不落盘"
+    },
+    "zes-openspec-propose": {
+      "kind": "cli-method",
+      "internal": "references/stage-S2-spec.md",
+      "external": "zes-openspec-propose",
+      "required": false,
+      "fallback": "references/openspec-manual-mode.md"
+    },
+    "zes-openspec-update-change": {
+      "kind": "cli-method",
+      "internal": "references/stage-S2-spec.md",
+      "external": "zes-openspec-update-change",
+      "required": false,
+      "fallback": "references/openspec-manual-mode.md"
+    },
+    "superpowers:writing-plans": {
+      "kind": "method",
+      "internal": "vendor/skills/zes-writing-plans/SKILL.md",
+      "external": "superpowers:writing-plans",
+      "required": false
+    },
+    "baseline-test": {
+      "kind": "procedure",
+      "internal": "references/stage-S4-env-baseline.md",
+      "external": null,
+      "required": true
+    },
+    "superpowers:subagent-driven-development": {
+      "kind": "method+scripts",
+      "internal": "vendor/skills/zes-sdd/SKILL.md",
+      "external": "superpowers:subagent-driven-development",
+      "required": true,
+      "scripts": {
+        "sdd-workspace": "scripts/sdd/sdd-workspace",
+        "task-brief": "scripts/sdd/task-brief",
+        "review-package": "scripts/sdd/review-package"
+      },
+      "override": "上游要求 worktree（SKILL.md:104）与 model 参数；本体系 W1/W9 覆盖"
+    },
+    "superpowers:test-driven-development": {
+      "kind": "method",
+      "internal": "vendor/skills/zes-tdd/SKILL.md",
+      "external": "superpowers:test-driven-development",
+      "required": false
+    },
+    "superpowers:verification-before-completion": {
+      "kind": "method",
+      "internal": "vendor/skills/zes-verification/SKILL.md",
+      "external": "superpowers:verification-before-completion",
+      "required": false
+    },
+    "superpowers:requesting-code-review": {
+      "kind": "method",
+      "internal": "vendor/skills/zes-code-review/SKILL.md",
+      "external": "superpowers:requesting-code-review",
+      "prompt_template": "references/roles/reviewer.md",
+      "output_template": "templates/review-report.md",
+      "required": false
+    },
+    "superpowers:receiving-code-review": {
+      "kind": "method",
+      "internal": "vendor/skills/zes-receiving-review/SKILL.md",
+      "external": "superpowers:receiving-code-review",
+      "required": false
+    },
+    "superpowers:finishing-a-development-branch": {
+      "kind": "method",
+      "internal": "vendor/skills/zes-finishing/SKILL.md",
+      "external": "superpowers:finishing-a-development-branch",
+      "required": false
+    },
+    "zes-openspec-apply-change": {
+      "kind": "cli-method",
+      "internal": "references/stage-S5-implement.md",
+      "external": "zes-openspec-apply-change",
+      "required": false,
+      "fallback": "references/openspec-manual-mode.md"
+    },
+    "zes-openspec-sync-specs": {
+      "kind": "cli-method",
+      "internal": "references/stage-S8-sync-archive.md",
+      "external": "zes-openspec-sync-specs",
+      "required": false,
+      "fallback": "references/openspec-manual-mode.md"
+    },
+    "zes-openspec-archive-change": {
+      "kind": "cli-method",
+      "internal": "references/stage-S8-sync-archive.md",
+      "external": "zes-openspec-archive-change",
+      "required": false,
+      "fallback": "references/openspec-manual-mode.md"
+    }
+  },
+  "gates": {
+    "G0": {
+      "name": "需求门禁",
+      "stage": "S0",
+      "stop": false,
+      "check": "需求清晰、已分级、影响面已识别、域路由已完成并说出口"
+    },
+    "G1": {
+      "name": "方案门禁",
+      "stage": "S1",
+      "stop": true,
+      "check": "方案与验收标准明确且经老板批准"
+    },
+    "G2": {
+      "name": "规格门禁",
+      "stage": "S2",
+      "stop": true,
+      "check": "OpenSpec 产物完整且经老板审阅"
+    },
+    "G3": {
+      "name": "计划门禁",
+      "stage": "S3",
+      "stop": false,
+      "check": "任务拆分合理、依赖明确、无占位符"
+    },
+    "G4": {
+      "name": "环境门禁",
+      "stage": "S4",
+      "stop": "baseline_red",
+      "check": "基线测试已记录"
+    },
+    "G5": {
+      "name": "实施门禁",
+      "stage": "S5",
+      "stop": false,
+      "check": "任务实现且审查双结论齐备",
+      "per_task": true
+    },
+    "G6": {
+      "name": "审查门禁",
+      "stage": "S6",
+      "stop": false,
+      "check": "Reviewer 明确批准"
+    },
+    "G7": {
+      "name": "验证门禁",
+      "stage": "S6",
+      "stop": false,
+      "check": "所需验证全部通过且为本会话证据"
+    },
+    "G8a": {
+      "name": "交付门禁",
+      "stage": "S7",
+      "stop": true,
+      "check": "集成后重测见绿、交付方式已选定"
+    },
+    "G8b": {
+      "name": "归档门禁",
+      "stage": "S8",
+      "stop": true,
+      "check": "规格已同步、任务全完成、归档完成"
+    }
+  },
+  "states": {
+    "$comment": "单一状态机：7 态为状态，SDD 的 4 态仅作边标签，不并入状态集。",
+    "list": [
+      "PENDING",
+      "IN_PROGRESS",
+      "REVIEW",
+      "NEEDS_FIX",
+      "BLOCKED",
+      "DONE",
+      "PARKED"
+    ],
+    "sdd_report_mapping": {
+      "DONE": "edge IN_PROGRESS->REVIEW",
+      "DONE_WITH_CONCERNS": "edge IN_PROGRESS->REVIEW",
+      "NEEDS_CONTEXT": "self-loop IN_PROGRESS->IN_PROGRESS",
+      "BLOCKED": "edge IN_PROGRESS->BLOCKED"
+    },
+    "transitions": [
+      {
+        "id": "T1",
+        "from": "PENDING",
+        "to": "IN_PROGRESS",
+        "trigger": "派发实施者前",
+        "evidence": "快照基线/ BASE + 派发记录行"
+      },
+      {
+        "id": "T2",
+        "from": "IN_PROGRESS",
+        "to": "IN_PROGRESS",
+        "trigger": "NEEDS_CONTEXT",
+        "evidence": "report 说明缺什么"
+      },
+      {
+        "id": "T3",
+        "from": "IN_PROGRESS",
+        "to": "BLOCKED",
+        "trigger": "2 次无法解阻",
+        "evidence": "report + 阻塞描述"
+      },
+      {
+        "id": "T4",
+        "from": "BLOCKED",
+        "to": "IN_PROGRESS",
+        "trigger": "补上下文/换专家/拆小",
+        "evidence": "新派发记录行"
+      },
+      {
+        "id": "T5",
+        "from": "IN_PROGRESS",
+        "to": "REVIEW",
+        "trigger": "报 DONE/DONE_WITH_CONCERNS",
+        "evidence": "变更集非空 + report 含命令输出退出码"
+      },
+      {
+        "id": "T6",
+        "from": "REVIEW",
+        "to": "NEEDS_FIX",
+        "trigger": "spec ❌ 或任一 Critical/Important",
+        "evidence": "审查结论 + findings"
+      },
+      {
+        "id": "T7",
+        "from": "NEEDS_FIX",
+        "to": "REVIEW",
+        "trigger": "一轮修复 + scoped 重审完成",
+        "evidence": "新变更集 + 逐条 ADDRESSED/NOT ADDRESSED"
+      },
+      {
+        "id": "T8",
+        "from": "REVIEW",
+        "to": "DONE",
+        "trigger": "spec ✅ 且质量通过",
+        "evidence": "双结论 + 主控亲跑全量见绿"
+      },
+      {
+        "id": "T9",
+        "from": "NEEDS_FIX",
+        "to": "PARKED",
+        "trigger": "5 轮仍 open，主控裁决",
+        "evidence": "Ruling 行含代价"
+      },
+      {
+        "id": "T10",
+        "from": "PARKED",
+        "to": "DONE",
+        "trigger": "终审裁决可接受",
+        "evidence": "终审 Ruling 行"
+      },
+      {
+        "id": "T11",
+        "from": "PARKED",
+        "to": "NEEDS_FIX",
+        "trigger": "终审裁决必须修",
+        "evidence": "终审 finding"
+      },
+      {
+        "id": "T12",
+        "from": "*",
+        "to": "BLOCKED",
+        "trigger": "环境故障/外部依赖缺失",
+        "evidence": "核证输出"
+      },
+      {
+        "id": "T13",
+        "from": "DONE",
+        "to": "NEEDS_FIX",
+        "trigger": "归档前回归发现破坏",
+        "evidence": "真实 RED 输出 + tasks.md 回退"
+      }
+    ],
+    "invariants": [
+      {
+        "id": "INV1",
+        "rule": "一个任务同一时刻只有一个状态"
+      },
+      {
+        "id": "INV2",
+        "rule": "DONE 当且仅当 tasks.md 该任务为 - [x]"
+      },
+      {
+        "id": "INV3",
+        "rule": "非 DONE 一律 - [ ]（含 PARKED）"
+      },
+      {
+        "id": "INV4",
+        "rule": "ledger 首行必须为 '# SDD ledger — plan: <计划路径>'"
+      },
+      {
+        "id": "INV5",
+        "rule": "任何 DONE 都能反查到变更集非空 + 审查结论"
+      },
+      {
+        "id": "INV6",
+        "rule": "任何状态变更都能在 ledger 找到对应行"
+      }
+    ]
+  },
+  "domain_routing": {
+    "$comment": "两轴强制串联（W10）：先规模后域，所有规模（含 readonly）都必须完成域轴路由；readonly 派 analyst。",
+    "mandatory": true,
+    "order": "scale-then-domain",
+    "entry": "S0",
+    "cli": "zcode_dev_workflow.py triage（双轴合一）",
+    "readonly_role": "analyst",
+    "dispatch_artifact": ".superpowers/sdd/dispatch-<ts>/dispatch.json",
+    "evidence": {
+      "with_ledger": "账本 ## Triage 段域路由两行（领域（category）/ 专家（name/basis））",
+      "without_ledger": "triage 会话内输出（领域路由两行）"
+    },
+    "degrade_policy": {
+      "degraded": "domain.degraded=true（路由异常与无专家两个发射点都置位）",
+      "blocking": "plan.blocking 非空（readonly conf=0 时两档文案并存，不做机械闲聊判定）",
+      "note": "领域结论禁 general-purpose 产出——降级仅承接机械执行"
+    }
+  },
+  "roles": {
+    "orchestrator": {
+      "label": "主控",
+      "dispatchable": false,
+      "note": "主控自任，不派子代理"
+    },
+    "implementer": {
+      "label": "实施者",
+      "dispatchable": true,
+      "cannot": [
+        "派子代理",
+        "改其他任务文件",
+        "改全局规格",
+        "隐瞒测试失败",
+        "自称完成"
+      ]
+    },
+    "reviewer": {
+      "label": "审查者",
+      "dispatchable": true,
+      "cannot": [
+        "改工作区",
+        "拿实施者上下文",
+        "信实施者自评",
+        "审自己参与实现的任务"
+      ]
+    },
+    "investigator": {
+      "label": "调查者",
+      "dispatchable": true,
+      "read_only": true,
+      "cannot": [
+        "改生产代码",
+        "自行实施修复"
+      ]
+    },
+    "analyst": {
+      "label": "分析者",
+      "dispatchable": true,
+      "read_only": true,
+      "cannot": [
+        "修改任何文件",
+        "自行实施修复",
+        "无证据下结论"
+      ]
+    }
+  },
+  "evidence_levels": {
+    "P1": {
+      "name": "事实",
+      "location": "文件快照哈希 或 git commit",
+      "persist": "交付后归档"
+    },
+    "P2": {
+      "name": "验收",
+      "location": "openspec/changes/<n>/tasks.md + 计划文档 ## Rulings",
+      "persist": "归档永久"
+    },
+    "P3": {
+      "name": "蓝图+证据",
+      "location": "docs/superpowers/plans/*.md 的 ## Baseline / ## Rulings / ## Review / ## Integration Verification",
+      "persist": "随仓库"
+    },
+    "P4": {
+      "name": "过程",
+      "location": ".superpowers/sdd/<plan>/",
+      "persist": "终审后删，删前必须导出 P3"
+    }
+  },
+  "trim_matrix": {
+    "$comment": "必=完整执行 简=简化 条=条件触发 - =跳过。裁决：'条' 的触发引擎未实现（见 tests/test_p8_precision.py:11-31），当前等价于'必'——workflow_check 只对'-'跳过，其余标记均执行完整检查器，请勿按'条件触发'语义误读",
+    "readonly": {
+      "S0": "必",
+      "S1": "-",
+      "S2": "-",
+      "S3": "-",
+      "S4": "-",
+      "S5": "-",
+      "S6": "-",
+      "S7": "-",
+      "S8": "-"
+    },
+    "light": {
+      "S0": "必",
+      "S1": "简",
+      "S2": "条",
+      "S3": "简",
+      "S4": "必",
+      "S5": "必",
+      "S6": "简",
+      "S7": "必",
+      "S8": "条"
+    },
+    "medium": {
+      "S0": "必",
+      "S1": "必",
+      "S2": "必",
+      "S3": "必",
+      "S4": "必",
+      "S5": "必",
+      "S6": "必",
+      "S7": "必",
+      "S8": "必"
+    },
+    "large": {
+      "S0": "必",
+      "S1": "必",
+      "S2": "必",
+      "S3": "必",
+      "S4": "必",
+      "S5": "必",
+      "S6": "必",
+      "S7": "必",
+      "S8": "必"
+    },
+    "bug": {
+      "S0": "必",
+      "S1": "条",
+      "S2": "条",
+      "S3": "条",
+      "S4": "条",
+      "S5": "必",
+      "S6": "必",
+      "S7": "必",
+      "S8": "条"
+    }
+  },
+  "minimum_gates": {
+    "readonly": [
+      "域路由已完成并说出口"
+    ],
+    "light": [
+      "分类已说出口",
+      "设计一句话+验收标准经老板批准",
+      "TDD 见 RED 输出",
+      "verification 门函数 5 步",
+      "审查 L0 或 L1 且有标记",
+      "改动清单",
+      "域路由已完成并说出口"
+    ],
+    "medium": [
+      "域路由已完成并说出口"
+    ],
+    "large": [
+      "域路由已完成并说出口"
+    ],
+    "bug": [
+      "7 类入口分诊",
+      "Phase1 根因调查（9 问可答）",
+      "假设三段",
+      "≥2 套方案+分级+副作用自查",
+      "双确认或快速通道",
+      "TDD 复现失败测试",
+      "red-green 四段复验",
+      "全量回归绿",
+      "审查+verification"
+    ]
+  },
+  "conflict_rulings": {
+    "W1": "无 worktree 即无实施并行：保留只读调查并行与审查并行，实施永远串行",
+    "W2": "中/大任务 design.md 唯一真相，阶段一不落盘；小任务落 docs/superpowers/specs/ 且标非权威",
+    "W3": "apply-change 直行与 SDD 模式互斥，同 change 不得混用",
+    "W4": "基线红不阻断开工，但必须记清单；此后红项比对：清单内=既存，清单外=本次引入",
+    "W5": "三重证据：变更集 + report 含命令输出退出码 + 主控亲跑全量",
+    "W6": "派发 prompt 首段硬声明流程契约优先于专家人格",
+    "W7": "git 探测失败走快照证据 + 主控自审（记 L1），交付中显式声明",
+    "W8": "PARKED 默认禁归档；接受不修必须迁出到新 change",
+    "W9": "无 model 参数，用专家粒度+任务颗粒度控成本；升档=换更专专家",
+    "W10": "两轴强制串行：所有任务（含只读与机械任务）先规模后域，域路由不得跳过；豁免仅两级——闲聊/问候、老板明示且记 Ruling"
+  },
+  "reviewer_independence": {
+    "levels": {
+      "L0": "独立子代理审查（可交付）",
+      "L1": "主控自审降级（可交付，必须显式声明）",
+      "L2": "无审查（禁止交付）"
+    },
+    "constraints": [
+      "I1 subagent_type 不得与 Implementer 相同",
+      "I2 不得把实施者自评当结论（只作待验证主张）",
+      "I3 只给 brief / report / 变更集三件，不给对话上下文",
+      "I4 Reviewer 只读，不得改文件",
+      "I5 不得审查自己参与实现的任务"
+    ]
+  }
+}
