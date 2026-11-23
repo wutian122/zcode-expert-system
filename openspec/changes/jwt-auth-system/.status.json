@@ -1,0 +1,10 @@
+{
+  "tasksCompleted": false,
+  "specsConsistent": true,
+  "testsPassed": true,
+  "reviewPassed": false,
+  "noBlockers": true,
+  "gitStatusOk": true,
+  "docsUpdated": true,
+  "parked": false
+}

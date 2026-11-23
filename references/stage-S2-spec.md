@@ -1,6 +1,7 @@
 # S2 · OpenSpec 规格规划
 
 **门禁**：G2（**停老板审产物**）｜ **证据级**：P2 ｜ **角色**：Orchestrator + 领域专家
+**组件**：zes-openspec-propose、zes-openspec-update-change（见 config/workflow.json 的 component_registry）
 
 ## 前置（不可跳过）
 

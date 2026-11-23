@@ -36,6 +36,16 @@ def _expert_names():
         return set(e["name"] for e in json.load(f)["experts"])
 
 
+def _valid_subagent_types():
+    """子代理派发名的合法集合（中文裸名 + Claude Code 限定名）。
+
+    ZCode 环境：中文裸名（如「后端架构师」）
+    Claude Code 环境：插件名:中文名（如「zcode-expert-system:后端架构师」）
+    """
+    names = _expert_names()
+    return names | {f"zcode-expert-system:{n}" for n in names}
+
+
 def _retry_remove(path, attempts=20, is_dir=False):
     """带核验的重试删除（T4 CONCERNS 遗留加固，复制自 test_domain_routing_mandatory.py）。
 
@@ -62,6 +72,55 @@ def _retry_remove(path, attempts=20, is_dir=False):
 def plan_for(task, **kw):
     r = wf.classify_scale(task, kw.get("files"))
     return wf.build_dispatch_plan(task, scale=r, files=kw.get("files"))
+
+
+# ---------------------------------------------------------------------------
+# I-02/I-03：低置信度误选专家必须阻断派发；高置信度 heuristic 标注依据
+# ---------------------------------------------------------------------------
+
+
+def test_low_confidence_heuristic_blocks_implementer_dispatch():
+    """I-02：分类置信度低于阈值时，不得按词元兜底选出的专家直接派发。
+
+    「实现一个支付回调的幂等性」词元退化后落 hr（conf 远低于 0.5），
+    选中的「招聘专家」与任务语义无关。语义精判未完成 + 低置信度
+    → 分类本身不可靠，必须阻断 implementer 派发，仅留 semantic_recheck
+    动作与 blocking，让主控澄清领域。
+    """
+    task = "实现一个支付回调的幂等性"
+    plan = plan_for(task)
+    # 确认这是低置信度 + heuristic 的场景（前提自检，避免用例随词表变化空转）
+    domain = plan.get("domain", {})
+    assert domain.get("confidence", 1.0) < 0.5, \
+        f"用例前提失效：该任务置信度应低于 0.5，实际 {domain.get('confidence')}"
+    assert domain.get("selection_basis") == "heuristic", \
+        f"用例前提失效：selection_basis 应为 heuristic，实际 {domain.get('selection_basis')}"
+    # 修复后：不得有 implementer 派发
+    impl_roles = [d for d in plan["dispatches"] if d["role"] == "implementer"]
+    assert not impl_roles, "低置信度 + heuristic 不得派发 implementer（分类不可靠）"
+    # 应保留 semantic_recheck 动作 + blocking
+    actions = [d.get("action") for d in plan["dispatches"]]
+    assert "semantic_recheck" in actions, "应保留 semantic_recheck 动作"
+    assert plan.get("blocking"), "低置信度误派必须设 blocking"
+
+
+def test_high_confidence_heuristic_keeps_recheck_but_dispatches():
+    """I-03：分类置信度高但 selection_basis=heuristic 时，保留派发但标注依据。
+
+    分类可靠（conf≥0.5），只是专家挑选是词元计数。此时保留 implementer
+    派发（分类正确），但 semantic_recheck 动作与 blocking 必须存在，
+    提醒主控复核 top_candidates 的 score_detail。
+    """
+    # 选一个高置信度、heuristic 的典型任务：域路由确定但专家词元计数
+    task = "修复用户登录接口的鉴权 bug"
+    plan = plan_for(task)
+    domain = plan.get("domain", {})
+    assert domain.get("confidence", 0.0) >= 0.5, \
+        f"用例前提失效：该任务置信度应 ≥0.5，实际 {domain.get('confidence')}"
+    impl_roles = [d for d in plan["dispatches"] if d["role"] == "implementer"]
+    assert impl_roles, "高置信度分类下应保留 implementer 派发"
+    actions = [d.get("action") for d in plan["dispatches"]]
+    assert "semantic_recheck" in actions, "heuristic 选择必须保留 semantic_recheck 提醒"
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +208,7 @@ def test_readonly_plan_dispatches_analyst():
             "实际 dispatches roles=%s）" % [d.get("role") for d in plan["dispatches"]]
         )
         sub = analysts[0].get("subagent_type")
-        assert sub in _expert_names(), (
+        assert sub in _valid_subagent_types(), (
             "analyst.subagent_type=%r 不是 config/experts.json 中的真实专家名" % sub
         )
     finally:

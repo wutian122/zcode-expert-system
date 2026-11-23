@@ -10,7 +10,7 @@ name: wf-check
 ## 执行
 
 ```bash
-python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/scripts/workflow_check.py" --change <change> --plan <plan.md> --scale <scale>
+python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/workflow_check.py" --change <change> --plan <plan.md> --scale <scale>
 ```
 
 `--json` 取结构化输出供脚本消费。

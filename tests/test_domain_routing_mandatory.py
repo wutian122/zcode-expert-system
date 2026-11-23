@@ -53,6 +53,12 @@ def _expert_names():
         return set(e["name"] for e in json.load(f)["experts"])
 
 
+def _valid_subagent_types():
+    """子代理派发名的合法集合（中文裸名 + Claude Code 限定名）。"""
+    names = _expert_names()
+    return names | {f"zcode-expert-system:{n}" for n in names}
+
+
 def plan_for(task, **kw):
     r = wf.classify_scale(task, kw.get("files"))
     return wf.build_dispatch_plan(task, scale=r, files=kw.get("files"))
@@ -163,7 +169,7 @@ def test_a2_readonly_analyst_writes_dispatch_json():
             % [d.get("role") for d in plan["dispatches"]]
         )
         sub = analysts[0].get("subagent_type")
-        assert sub in _expert_names(), (
+        assert sub in _valid_subagent_types(), (
             "analyst.subagent_type=%r 不是 config/experts.json 中的真实专家名" % sub
         )
 

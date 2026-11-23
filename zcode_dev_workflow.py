@@ -32,6 +32,27 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WORKFLOW_PATH = os.path.join(BASE_DIR, "config", "workflow.json")
 
 
+def _qualified_subagent_type(expert_name):
+    """按运行平台决定子代理派发名。
+
+    Claude Code 要求 <插件名>:<frontmatter.name> 的限定形式；
+    ZCode 使用中文裸名。用 CLAUDE_PLUGIN_ROOT 是否注入作判据。
+
+    与 zcode_expert_system.py 的同名函数保持同构（两处各自独立定义，
+    测试互不依赖；改口径时须同步两处，tests/test_semantic_selection.py
+    的 test_qualified_subagent_type_by_platform 会锁住 zcode_expert_system
+    侧的行为）。
+
+    expert_name 为 None/空（域路由降级）时原样返回，由调用方的降级分支
+    处理（general-purpose 等内置类型不带插件前缀）。
+    """
+    if not expert_name:
+        return expert_name
+    if os.environ.get("CLAUDE_PLUGIN_ROOT"):
+        return "zcode-expert-system:%s" % expert_name
+    return expert_name
+
+
 def _force_utf8_stdout():
     """让 stdout/stderr 用 UTF-8 输出，避免非 UTF-8 控制台抛 UnicodeEncodeError。
 
@@ -126,6 +147,10 @@ WRITE_SIGNALS = (
     # 基础改动动词
     "改", "加", "创建", "新建", "删除", "移除", "修复", "实现", "开发",
     "写", "重构", "优化", "迁移", "升级", "替换", "接入", "配置",
+    # I-04：单字改动动词「变更/改变」。此前缺失导致「数据模型变更」
+    # /「接口变更」这类纯名词短语式改动被判只读，进而合规跳过 S1-S8
+    # 全部门禁（无账本、无 FAIL 可查）。对照「修改数据模型」能判 large。
+    "变更", "改变",
     # 设计/规划类（中文语境下「设计一个 X」几乎总是要落地实现，
     # 纯只读分析会说「分析/解释/评估/看看」，不会说「设计一个」）
     "设计", "规划", "方案设计", "起草", "制定",
@@ -138,7 +163,35 @@ WRITE_SIGNALS = (
     # 执行/运行类（「训练一个模型」「微调」「跑一次」都是动手做事，不是只读分析）
     "训练", "微调", "跑一次", "跑一下", "执行", "运行", "编译", "构建",
     "生成", "导出", "导入", "批量处理", "清洗",
+    # I-N-NEW：搭建/建设此前只在 FEATURE_CONTEXT（:141 新功能语境）与
+    # NEW_BUILD_VERBS（能力词守卫）登记，唯本主表缺失——「搭建一个博客系统」
+    # 「建设一个数据中台」被判只读，合规跳过 S1-S8 全部门禁。与 I-04「变更」
+    # 同族：语境表/守卫表登记了动词、主表缺席（表间一致性校验已固化于
+    # test_p4_consistency.py，再缺主表必红）。刻意**不进 HARD_WRITE**：
+    # 「帮我看看这个搭建方案合理吗」是评审请求，HARD_WRITE 会短路
+    # readonly_hits 让它误落实施流程（守护反例已固化）。
+    "搭建", "建设",
+    # 「处理一下/处理下」只收**复合执行形态**（祈使句缓和词）。裸「处理」
+    # 刻意不加：实测「怎么处理这个报错」（询问）会失守；「异常处理」
+    # （名词语境）同。应急/事件响应是明确的执行任务（处置+复盘+整改），
+    # 同样刻意不进 HARD_WRITE（「应急响应预案帮我评估一下」须保持只读）。
+    "处理一下", "处理下", "应急响应", "事件响应",
+    # I-2 处置复合形态（遗留-② 最小解）：与「处理一下/处理下」同族。
+    # 裸「处置」实测误伤面大（「危废处置资质有哪些」名词语境、「怎么处置
+    # 这个告警」询问语境），只收祈使复合形态；裸「处置」句是已知覆盖
+    # 缺口（见 README 残余风险），守护反例已固化于 test_scale_triage.py。
+    "处置一下", "处置下",
 )
+
+# 新建类动词守卫表：能力词（无法/不能）+ 本表动词共现 → 「要新增东西」，
+# 不算故障陈述（「增加无法登录时的提示」）。I-1 提升为模块级：
+# 一致性校验（test_p4_consistency.py）要求本表实施动词必须在 WRITE_SIGNALS
+# 有登记（或显式豁免留档）——此前「搭建」在本表而主表缺席，
+# 「搭建一个博客系统」误判只读，整条门禁链被合规跳过。
+# 本表补「建设」：原表只有「搭建」，与 FEATURE_CONTEXT 不对称；
+# 行为上只影响「无法…建设」的守卫覆盖（新功能方向，保守无实害）。
+NEW_BUILD_VERBS = ("增加", "新增", "添加", "实现", "设计", "开发",
+                   "做一个", "做个", "写一个", "写个", "搭建", "建设")
 
 # 只读语境标记：明确的「只求理解、不求改动」表述。
 # 出现这些词时，即使含「设计/方案/架构」等名词也判只读——
@@ -223,15 +276,17 @@ def _is_ascii_word(signal):
 
 
 def _word_hit(signal, text):
-    """信号词命中：ASCII 词整词、中文词子串。
+    """信号词命中：ASCII 词整词、中文词子串（尾部数字段做边界）。
 
     修的破坏（裸子串 `s in text`）：`bug` 命中 de**bug**、`fix` 命中
     **fix**ture、`error` 命中 **error**s、STRONG_BUG 的 `500` 命中 **500**0——
     再叠加独立语境词就凑齐「信号 + 语境共现」，把正常需求判成 Bug。
+    B-01：「返回500」尾部数字段被「返回5000」命中——中文词尾部数字段
+    后不得紧跟数字（属更长数字串的一部分）。
     大小写维持既有行为：text 已在调用方 lower()，信号词本身全小写。
     """
     if not _is_ascii_word(signal):
-        return signal in text
+        return _chinese_word_hit(signal, text)
     start = text.find(signal)
     n = len(signal)
     while start != -1:
@@ -241,6 +296,26 @@ def _word_hit(signal, text):
                 and next_ch.lower() not in _ASCII_WORD_CHARS):
             return True
         start = text.find(signal, start + 1)
+    return False
+
+
+def _chinese_word_hit(signal, text):
+    """含中文信号词的子串匹配，尾部数字段做边界检查。
+
+    修 B-01：「返回500」尾部数字段「500」，文本「返回5000行数据」中
+    「500」后紧跟数字「0」，属「5000」的一部分，不得命中；而
+    「接口返回500错误」中「500」后是「错」（非数字），仍命中。
+    含中文且无数字尾部的词（如「修复」「异常」）维持裸子串，不受影响。
+    """
+    start = text.find(signal)
+    while start != -1:
+        n = len(signal)
+        next_ch = text[start + n] if start + n < len(text) else ""
+        if re.search(r'[0-9]+$', signal) and next_ch.isdigit():
+            # 信号词以数字结尾且命中位置后紧跟数字 → 属更长数字串的一部分
+            start = text.find(signal, start + 1)
+            continue
+        return True
     return False
 
 
@@ -261,6 +336,10 @@ def classify_scale(task_description, file_count=None):
       4. 中/轻量——按文件数
     """
     text = (task_description or "").lower()
+    # N-03：清洗零宽/不可见字符后再匹配。「修​复登录 bug」中零宽空格
+    # 把「修复」切成「修」「复」，导致写动作信号漏判、Bug 被误落只读。
+    # 覆盖 ZWSP/ZWJ/ZWNJ/LRM/RLM/BOM/软连字符等常见不可见字符。
+    text = re.sub(r"[​-‏⁠-⁤﻿­]", "", text)
     wf = load_workflow()
     scales = wf["scale"]
     reasons = []
@@ -310,8 +389,9 @@ def classify_scale(task_description, file_count=None):
     # 判据：能力词 + **新建类**动词 → 不算故障。
     # 只认新建/设计类动词，不认 `模块`/`流程`/`功能` 这类纯名词。
     ABILITY_WORDS = ("无法", "不能")
-    NEW_BUILD_VERBS = ("增加", "新增", "添加", "实现", "设计", "开发",
-                       "做一个", "做个", "写一个", "写个", "搭建")
+    # NEW_BUILD_VERBS 已提升为模块级常量（原为函数局部）：
+    # 供 test_p4_consistency.py 的表间一致性校验锚定——它是守卫表，
+    # 与 WRITE_SIGNALS 主表的成员对应关系必须有测试盯住（I-N-NEW 缺陷）。
     ability_hits = [w for w in ABILITY_WORDS if w in text]
     # 能力词 + 新建动词 → 新功能需求
     if ability_hits and any(v in text for v in NEW_BUILD_VERBS):
@@ -339,6 +419,38 @@ def classify_scale(task_description, file_count=None):
                 reasons.append(
                     "现象词有故障旁证（%s）→ 判 Bug" % "、".join(phenomenon_backed[:3]))
             return _build("bug", scales, wf, reasons)
+
+    # --- 1a（补救支路，R9）：显式修复动作 + 故障信号词，且无新功能语境 ---
+    #
+    # BUG_CONTEXT 与 BUG_SIGNALS 刻意零交集（P6 防自证），导致
+    # 「修复登录接口的鉴权 bug」这类句子：bug/修复 皆是信号词，
+    # 句中却无独立语境词（为什么/卡死/500...），走不到 :348 的
+    # 门槛，误落 light，根因排查链路丢失。
+    #
+    # 此处补一条跨表通道：显式修复动词与信号词共现 → 判 Bug。不动
+    # BUG_SIGNALS / BUG_CONTEXT 两表，保持零交集；只由修复类动词与
+    # bug_hits 共同触发，避免单一词自证。
+    #
+    # I-01：语境判定改为「位置优先」而非「无新功能语境」。
+    #   「修复登录接口的鉴权 bug，顺便增加日志采集」——修复动词在前、
+    #   增加在后（次要从句），主诉是 Bug 修复 → 判 Bug。
+    #   「增加修复后的日志采集功能」——增加在前（主诉）、修复在后
+    #   （定语），主诉是新功能 → 维持 feature_ctx 拦截，不判 Bug。
+    HARD_FIX_WORDS = ("修复", "修一下", "修下", "改修", "bugfix",
+                      "hotfix", "补丁", "打补丁")
+    fix_hits = [w for w in HARD_FIX_WORDS if w in text]
+    # 位置优先：新功能动词出现在修复动词之前 → 主诉是新功能，拦截判 Bug
+    feature_first = False
+    if feature_ctx_hits and fix_hits:
+        fix_pos = min(text.find(w) for w in fix_hits if text.find(w) != -1)
+        feat_pos = min(text.find(v) for v in feature_ctx_hits if text.find(v) != -1)
+        feature_first = feat_pos < fix_pos
+    if fix_hits and bug_hits and not feature_first:
+        reasons.append(
+            "命中显式修复动作（%s）与故障信号（%s）→ 判 Bug"
+            % ("、".join(fix_hits[:3]), "、".join(bug_hits[:3]))
+        )
+        return _build("bug", scales, wf, reasons)
 
     # --- 1b. 纯现象陈述：有强故障词/有旁证的现象词，且无新功能语境 ---
     #
@@ -527,7 +639,12 @@ def _build(scale_key, scales, wf, reasons):
         "criteria": spec["criteria"],
         "trim": wf["trim_matrix"][scale_key],
         "min_gates": wf["minimum_gates"].get(scale_key, []),
-        "ratchet": "规模只能升级不能降级",
+        # N-08：从唯一声明源读取，不再硬编码——workflow.json 顶层
+        # scale_ratchet 是声明源（workflow_check.py:1826 注释引用它），
+        # 硬编码会让配置与实现漂移。兜底保留原文案（配置缺失时不崩）。
+        # 注意：不能放在 scale 对象内部——self_check 会把 scale 下每个键
+        # 当成一个「规模」，要求 trim_matrix 有对应行（N-08 首版踩过）。
+        "ratchet": wf.get("scale_ratchet", "规模只能升级不能降级"),
     }
 
 
@@ -632,6 +749,9 @@ def _route_domain(task_description, persist=True):
             "semantic_selection_required": route.get("semantic_selection_required"),
             "selection_basis": route.get("selection_basis"),
             "routing_warning": route.get("routing_warning"),
+            # P4：判平标记必须透传——score_tied=True 时 expert_name 的取胜依据
+            # 是「候选顺序」而非分值，主控必须改判或明示采信理由。
+            "score_tied": route.get("score_tied"),
             "top_candidates": [
                 {"name": c.get("name"), "score": c.get("score"),
                  "score_detail": c.get("score_detail")}
@@ -675,7 +795,8 @@ def _write_dispatch_artifact(plan):
             "category": plan["domain"].get("category"),
             "expert_name": plan["domain"].get("expert_name"),
             "expert_id": plan["domain"].get("expert_id"),
-            "subagent_type": plan["domain"].get("expert_name"),
+            "subagent_type": _qualified_subagent_type(
+                plan["domain"].get("expert_name")),
             "role": "analyst",
             "confidence": plan["domain"].get("confidence"),
             "selection_basis": plan["domain"].get("selection_basis"),
@@ -757,7 +878,10 @@ def build_dispatch_plan(task_description, scale=None, files=None, root=None):
             "note": "Python 侧专家选择只是词元计数（selection_basis=%s）。"
                     "派发前必须复核 domain.top_candidates[].score_detail，"
                     "按业务语义定夺；要改判用 "
-                    "zcode_expert_system.build_dispatch_for_expert(专家名, 任务)"
+                    "zcode_expert_system.build_dispatch_for_expert(专家名, 任务)。"
+                    "注意 token/jwt/oauth 按声明序落 security-compliance："
+                    "若任务实为「实现/刷新/接入」等功能开发，应改判 "
+                    "backend-architecture。"
                     % domain.get("selection_basis"),
         })
         # P1-6：setdefault——degraded 分支已置的更具体 blocking（路由失败
@@ -768,15 +892,54 @@ def build_dispatch_plan(task_description, scale=None, files=None, root=None):
         ))
 
     # --- 只读任务：按域路由结论派 analyst（D3/D6；旧「不分派」契约已删） ---
+    #
+    # P2（2026-11-23）：只读分支此前只判 `expert_name` 是否为**空**，不判置信度——
+    # 非只读路径有 low_conf_heuristic 阻断，只读路径没有，形成护栏不对称。
+    # 实测代价：`plan "分析一下 zcode_expert_system.py 的结构"` → conf=0.0312，
+    # 仍派发「无障碍审核员」（词元碰巧命中），blocking 只说「精判待完成」，
+    # 不提示「分类本身可能是错的」。这里把同一判定搬进只读分支。
+    #
+    # 注意 semantics_selection_required 与 confidence 的关系：selection_basis
+    # 恒为 heuristic（本插件不配 LLM），所以只要 top_candidates 非空就必然置位；
+    # 真正决定「分类可不可靠」的是 confidence，不是这个布尔值。
+    from zcode_expert_system import LOW_CONFIDENCE_THRESHOLD
+    readonly_low_conf = bool(
+        domain.get("semantic_selection_required")
+        and (domain.get("confidence") or 0) < LOW_CONFIDENCE_THRESHOLD
+    )
+
     if scale["scale"] == "readonly":
         plan["note"] = "只读任务：直接分析输出，不进入实施流程"
         plan["parallel"] = {"implementation": "n/a", "reason": "只读任务无实施"}
         expert_name = domain.get("expert_name")
-        if expert_name:
+        if expert_name and readonly_low_conf:
+            # 低置信度 + heuristic：分类本身不可靠，不按词元兜底专家派 analyst。
+            # 与 I-02 同口径，但用 action=blocked_low_confidence（非 analyst 派发），
+            # 且**不落盘 dispatch.json**——未定领域的派发不构成审计锚点。
+            plan["dispatches"].append({
+                "role": "orchestrator",
+                "action": "blocked_low_confidence",
+                "note": "只读任务分类置信度 %.3f 低于阈值 %s 且语义精判未完成："
+                        "分类本身不可靠，不按词元兜底专家（当前建议 %s）派 analyst。"
+                        "请向老板澄清任务领域，或复核 domain.top_candidates[].score_detail "
+                        "后用 zcode_expert_system.build_dispatch_for_expert(专家名, 任务) "
+                        "指定专家后重跑。"
+                        % (domain.get("confidence") or 0,
+                           LOW_CONFIDENCE_THRESHOLD,
+                           expert_name),
+            })
+            plan.setdefault("blocking", (
+                "只读任务低置信度阻断（P2）：分类置信度 %.3f < %s 且语义精判未完成，"
+                "词元兜底专家「%s」与任务语义可能无关，不得直接派发。"
+                "须向老板澄清领域，或用 build_dispatch_for_expert(专家名, 任务) 指定后重跑。"
+                % (domain.get("confidence") or 0, LOW_CONFIDENCE_THRESHOLD,
+                   expert_name)
+            ))
+        elif expert_name:
             # 域路由成功 + 专家已选 → 派 analyst + 落盘 dispatch.json（裁决 2）
             plan["dispatches"].append({
                 "role": "analyst",
-                "subagent_type": expert_name,
+                "subagent_type": _qualified_subagent_type(expert_name),
                 "prompt_prefix": _role_contract_prefix("analyst"),
                 "note": "只读分析：禁改文件；结论按「现象→原因→影响→建议」四段式"
                         "并带 file:line/URL 证据；领域判断由 analyst 承担，"
@@ -788,6 +951,11 @@ def build_dispatch_plan(task_description, scale=None, files=None, root=None):
             # 不做机械闲聊判定：两档并存陈述，归类交主控按语境判断。
             # I-1（修复轮 1）：用 setdefault——路由异常（degraded）与语义精判
             # 待复核先行设置的 blocking 都不覆盖，不吞已有信息。
+            # N-01：conf=0 时 domain.category 只是 DEFAULT_CATEGORY 兜底
+            # （business-support），不是真实的领域判断——加 no_signal 标记，
+            # 避免消费方把「无信号」误读成「商务支持任务」。
+            if not (domain.get("confidence") or 0):
+                domain["no_signal"] = True
             plan.setdefault("blocking", (
                 "readonly 域路由未产出专家（conf=%s，category=%s）：两档可能——"
                 "① 疑似闲聊/问候（建议直接问候回应，不走专家体系）；"
@@ -799,15 +967,24 @@ def build_dispatch_plan(task_description, scale=None, files=None, root=None):
         return plan
 
     # --- 非只读：语义 blocking 已定，按域结论派 Implementer/Reviewer ---
+    # I-02：分类置信度低于阈值且语义精判未完成时，分类本身不可靠——
+    # 词元兜底选出的专家（如 hr「招聘专家」命中 bigram「一个」）与任务
+    # 语义无关，不得直接派发。高置信度 + heuristic（I-03）分类可靠，
+    # 保留派发，semantic_recheck 动作与 blocking 提醒主控复核 score_detail。
+    from zcode_expert_system import LOW_CONFIDENCE_THRESHOLD
+    low_conf_heuristic = bool(
+        domain.get("semantic_selection_required")
+        and (domain.get("confidence") or 0) < LOW_CONFIDENCE_THRESHOLD
+    )
     # Implementer
-    if implementer_type:
+    if not low_conf_heuristic and implementer_type:
         plan["dispatches"].append({
             "role": "implementer",
-            "subagent_type": implementer_type,
+            "subagent_type": _qualified_subagent_type(implementer_type),
             "prompt_prefix": _role_contract_prefix("implementer"),
             "note": "实施者禁止派子代理；不得超出 brief 范围",
         })
-    else:
+    elif not low_conf_heuristic:
         # I1 降级统一：no-expert 是第二降级发射点，note 如实陈述——
         # general-purpose 只承接机械执行，领域结论禁由通用代理产出（不说谎话）
         domain["degraded"] = True
@@ -830,18 +1007,41 @@ def build_dispatch_plan(task_description, scale=None, files=None, root=None):
             "指定后重新路由。"
             % domain.get("confidence")
         ))
+    else:
+        # I-02：低置信度 + heuristic，分类不可靠——不派 implementer/reviewer。
+        # semantic_recheck 动作与 blocking 已在语义精判段置入，此处补明确
+        # 的 blocked 说明，让主控看到「为什么没派、下一步怎么做」。
+        # 用 role=orchestrator 而非 implementer：这是阻断说明，不是实际派发。
+        plan["dispatches"].append({
+            "role": "orchestrator",
+            "action": "blocked_low_confidence",
+            "note": "分类置信度 %.3f 低于阈值且语义精判未完成：分类本身不可靠，"
+                    "不按词元兜底专家派发。请向老板澄清任务领域，或用 "
+                    "zcode_expert_system.build_dispatch_for_expert(专家名, 任务) "
+                    "指定专家后重跑。"
+                    % (domain.get("confidence") or 0)
+        })
+        plan.setdefault("blocking", (
+            "低置信度误派阻断（I-02）：分类置信度 %.3f < %s 且语义精判未完成，"
+            "词元兜底专家与任务语义无关，不得直接派发。须向老板澄清领域，"
+            "或用 build_dispatch_for_expert(专家名, 任务) 指定后重跑。"
+            % (domain.get("confidence") or 0, LOW_CONFIDENCE_THRESHOLD)
+        ))
 
     # Reviewer：独立性由实际配对 + git 状态推导（含理由，便于账本记录）
-    reviewer_type, independence, independence_reason = _pick_reviewer(
-        implementer_type, has_git=has_git)
-    plan["dispatches"].append({
-        "role": "reviewer",
-        "subagent_type": reviewer_type,
-        "independence": independence,
-        "independence_reason": independence_reason,
-        "prompt_prefix": _role_contract_prefix("reviewer"),
-        "note": "只给 brief/report/变更集三件；Do Not Trust the Report",
-    })
+    # 低置信度被阻断时无实施者，无需审查者（语义精判段的 semantic_recheck
+    # 动作已覆盖主控复核动作）。
+    if not low_conf_heuristic:
+        reviewer_type, independence, independence_reason = _pick_reviewer(
+            implementer_type, has_git=has_git)
+        plan["dispatches"].append({
+            "role": "reviewer",
+            "subagent_type": _qualified_subagent_type(reviewer_type),
+            "independence": independence,
+            "independence_reason": independence_reason,
+            "prompt_prefix": _role_contract_prefix("reviewer"),
+            "note": "只给 brief/report/变更集三件；Do Not Trust the Report",
+        })
 
     # Investigator：仅当存在并行取证需求
     plan["parallel"] = {
@@ -1070,6 +1270,13 @@ def _main(argv):
                     "，语义精判待复核"
                     if domain.get("semantic_selection_required") else "",
                 ))
+                # N-07：conf=0 且无专家时显式提示，对齐 build_dispatch_plan
+                # 的 blocking 两档文案——否则主控只能从「领域专家：无」自行推断。
+                if not domain.get("expert_name") and not (domain.get("confidence") or 0):
+                    print("  ⚠️ 无信号（conf=0）：两档可能——"
+                          "① 疑似闲聊/问候，可直接回应不走专家体系；"
+                          "② 真无信号，须向老板澄清任务领域，或用 "
+                          "build_dispatch_for_expert(专家名, 任务) 指定后重跑。")
             for r in res["reasons"]:
                 print("  依据：%s" % r)
             print("  阶段裁剪：%s" % ", ".join(

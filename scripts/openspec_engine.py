@@ -23,6 +23,30 @@ PRODUCTS = {
     "specs": "specs",
 }
 
+# I-05：归档前校验 tasks.md 实际勾选。口径与 workflow_check.count_checkboxes
+# 一致——空框 [] 算未完成，仅 x/X 算完成（[ x ] 带空格同样算 x）。
+_TASK_LINE_PATTERN = re.compile(r"^\s*(?:[-*+]|\d{1,9}[.)])\s*\[([^\]]*)\]\s*(.*)$")
+
+
+def count_task_checkboxes(text):
+    """统计 tasks.md 勾选：返回 (done, todo)。
+
+    空框 [] 算 todo（未完成）；x/X（含 [ x ] 带空格）算 done。
+    与 workflow_check.count_checkboxes 的 done/todo 口径一致，但 I-05
+    只需二分判定，不单独拆 other（异形标记 [~] 等按未完成处理，更保守）。
+    """
+    done = todo = 0
+    for line in (text or "").splitlines():
+        m = _TASK_LINE_PATTERN.match(line)
+        if not m:
+            continue
+        mark = (m.group(1) or "").strip().lower()
+        if mark == "x":
+            done += 1
+        else:
+            todo += 1
+    return done, todo
+
 
 def change_dir(root: Path, name: str) -> Path:
     # 库模式抛 ValueError（调用方自行处置）；6 个 CLI 入口捕获后转
@@ -135,6 +159,16 @@ def cmd_status(args) -> int:
             if entry.is_file():
                 artifact_paths[entry.name] = str(entry.resolve())
         result["artifactPaths"] = artifact_paths
+    # M2 修复：补齐 S8 delta 唯一来源 artifactPaths.specs.existingOutputPaths。
+    # 文档（config/workflow.json:336、commands/wf/archive.md:24、stage-S8）声明主控
+    # 只认此嵌套字段，但旧实现只产扁平 artifacts 映射，导致 S8 同步机制静默失效。
+    # 现从 change 的 specs/*/spec.md 收集 existingOutputPaths，与文档对齐。
+    specs_dir = cdir / "specs"
+    existing_output_paths = []
+    if specs_dir.is_dir():
+        for spec_file in sorted(specs_dir.glob("*/spec.md")):
+            existing_output_paths.append(str(spec_file.resolve()))
+    result["artifactPaths"].setdefault("specs", {})["existingOutputPaths"] = existing_output_paths
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
@@ -435,6 +469,24 @@ def cmd_archive_change(args) -> int:
         print(f"error: archive conditions not met: {', '.join(failed)}", file=sys.stderr)
         return 1
 
+    # I-05：七标志全 true 只是手工维护的元数据，必须与 tasks.md 实际勾选
+    # 状态核对。tasks.md 存在时，有未勾选任务则拒绝归档；不存在时
+    # 无账本可查，沿用 status 标志（保持既有口径）。
+    tasks_path = cdir / "tasks.md"
+    if tasks_path.is_file():
+        try:
+            tasks_text = tasks_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"error: tasks.md read failed: {exc}", file=sys.stderr)
+            return 1
+        done, todo = count_task_checkboxes(tasks_text)
+        if todo > 0:
+            print(
+                f"error: archive blocked: tasks.md has {todo} unchecked "
+                f"task(s) ({done} done)",
+                file=sys.stderr)
+            return 1
+
     # 变更目录只允许标准产物（含引擎元数据与 artifacts）；插件运行时残留
     # （如 .mimosa）混入时拒绝归档——备份在归档成功后即删，无清理兜底
     allowed = {"proposal.md", "design.md", "tasks.md", "specs",
@@ -628,5 +680,28 @@ def main(argv=None) -> int:
     return args.func(args)
 
 
+def _force_utf8_stdout():
+    """让 stdout/stderr 用 UTF-8 输出，避免非 UTF-8 控制台抛 UnicodeEncodeError。
+
+    中文 Windows 默认代码页 CP936 可编码 GB2312 汉字，但无法编码 emoji
+    （⚙️ U+2699）与 ⇒(U+21D2) 等符号。本脚本 :569 等处 print(json.dumps
+    (..., ensure_ascii=False)) 会把含 emoji 的路径/内容原样透出，CP936
+    终端下抛 UnicodeEncodeError，rc=1、stdout 全空。
+
+    与 zcode_expert_system.py / zcode_dev_workflow.py / skill_entry.py
+    / scripts/workflow_check.py 的同名函数保持一致（R10 补齐最后一个入口）。
+    """
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 if __name__ == "__main__":
+    _force_utf8_stdout()
     sys.exit(main())

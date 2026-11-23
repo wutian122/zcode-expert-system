@@ -67,7 +67,8 @@ def test_冒号名已清零():
 
 def test_self_check_rc_0():
     proc = subprocess.run([sys.executable, WORKFLOW_CHECK, "--self-check"],
-                          capture_output=True, text=True, cwd=PLUGIN_ROOT)
+                          capture_output=True, text=True, cwd=PLUGIN_ROOT,
+                          encoding='utf-8', errors='replace')
     assert proc.returncode == 0, "self_check 应返回 0，实际 %d：%s" % (
         proc.returncode, proc.stdout + proc.stderr)
 
@@ -79,7 +80,8 @@ def test_self_check_缺失资产即失败():
     os.replace(target, backup)
     try:
         proc = subprocess.run([sys.executable, WORKFLOW_CHECK, "--self-check"],
-                              capture_output=True, text=True, cwd=PLUGIN_ROOT)
+                              capture_output=True, text=True, cwd=PLUGIN_ROOT,
+                              encoding='utf-8', errors='replace')
         assert proc.returncode != 0, \
             "缺失 required 资产时 self_check 应非零退出，实际 %d" % proc.returncode
         assert "stage-S4-env-baseline.md" in (proc.stdout + proc.stderr), \
@@ -87,6 +89,7 @@ def test_self_check_缺失资产即失败():
     finally:
         os.replace(backup, target)
     proc = subprocess.run([sys.executable, WORKFLOW_CHECK, "--self-check"],
-                          capture_output=True, text=True, cwd=PLUGIN_ROOT)
+                          capture_output=True, text=True, cwd=PLUGIN_ROOT,
+                          encoding='utf-8', errors='replace')
     assert proc.returncode == 0, "恢复后 self_check 应返回 0，实际 %d：%s" % (
         proc.returncode, proc.stdout + proc.stderr)

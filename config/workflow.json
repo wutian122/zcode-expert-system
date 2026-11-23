@@ -1,6 +1,6 @@
 {
   "$comment": "唯一声明源：九阶段的产物、门禁、证据级别只在此声明一次。SKILL.md / commands / workflow_check.py 三处消费，禁止各自手写。修改本文件即修改工作流定义。",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "components": {
     "openspec": "规格真相源（应该做什么）",
     "superpowers": "工程纪律（按什么纪律做）",
@@ -38,6 +38,7 @@
       "note": "Bug 优先于规模判定，走横切支路"
     }
   },
+  "scale_ratchet": "规模只能升级不能降级",
   "stages": [
     {
       "id": "S0",
@@ -85,10 +86,10 @@
       "name": "OpenSpec 规格规划",
       "short": "规格",
       "role": "orchestrator",
-        "components": [
-            "zes-openspec-propose",
-            "zes-openspec-update-change"
-        ],
+      "components": [
+        "zes-openspec-propose",
+        "zes-openspec-update-change"
+      ],
       "artifacts": [
         {
           "path": "openspec/changes/<change>/proposal.md",
@@ -202,11 +203,11 @@
       "name": "代码实施与多 Agent 协作",
       "short": "实施",
       "role": "implementer",
-        "components": [
-            "superpowers:subagent-driven-development",
-            "superpowers:test-driven-development",
-            "zes-openspec-apply-change"
-        ],
+      "components": [
+        "superpowers:subagent-driven-development",
+        "superpowers:test-driven-development",
+        "zes-openspec-apply-change"
+      ],
       "artifacts": [
         {
           "path": ".superpowers/sdd/<plan>/task-<N>-brief.md",
@@ -311,10 +312,10 @@
       "name": "规格同步与归档",
       "short": "归档",
       "role": "orchestrator",
-        "components": [
-            "zes-openspec-sync-specs",
-            "zes-openspec-archive-change"
-        ],
+      "components": [
+        "zes-openspec-sync-specs",
+        "zes-openspec-archive-change"
+      ],
       "artifacts": [
         {
           "path": "openspec/specs/<capability>/spec.md",

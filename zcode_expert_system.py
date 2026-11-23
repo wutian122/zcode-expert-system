@@ -98,10 +98,28 @@ KEYWORD_MAP = {
         "渗透", "漏洞", "安全审计", "威胁检测", "威胁情报", "加密", "防火墙策略",
         "安全架构", "secops", "密钥", "凭据", "安全评估", "红队", "合规审计",
         "soc2", "iso27001", "等保", "身份与访问", "越权", "csp",
+        # R6：认证授权安全词元。jwt/oauth/token 同时声明在 backend-architecture（功能视角），
+        # 此处补入安全视角，靠声明序（security 在前）让安全事件胜出。
+        # 裸 jwt/oauth/token 与 backend 同长 → 触发同分决胜（security 在 :97 靠前），
+        # 安全事件（如"JWT token 泄漏应急"）由此拉回 security-compliance。
+        # 注意：裸 token 会让"实现 token 刷新"这类功能任务同分落 security，
+        # 与裸 jwt 的边界取舍一致（方案预期内，业务边界模糊可接受）。
+        # 另补 token泄漏/泄露 复合词，覆盖中文连写场景。
+        "jwt", "oauth", "token", "应急响应", "安全事件", "安全事故",
+        "token泄漏", "token泄露", "jwt泄漏", "jwt泄露",
+        # R7：补入「安全审查」「代码审计」——带安全意图的审查正确路由到 security。
+        "安全审查", "代码审计",
+        # H1 修复：补入「sql注入」「注入漏洞」「渗透测试」等复合词（长度≥4），
+        # 压过 data-database 的裸 sql（长度3）。否则「渗透测试发现 SQL 注入漏洞」
+        # 会被 data-database 的 sql 劫持（最长关键词独胜），误路由到数据库领域。
+        # 裸「渗透」「漏洞」保留（长度2），用于无 sql 语境的安全任务。
+        "sql注入", "注入漏洞", "渗透测试", "注入攻击", "sql注入漏洞",
     ],
     "legal-compliance": [
         "合同审查", "合同起草", "合同条款", "法律", "合规", "诉讼", "知识产权",
         "专利", "商标", "法务", "法规", "制度文件", "隐私政策", "用户协议", "律所",
+        # R7：「合规检查」从 engineering-quality 迁入——合规语义归法律合规。
+        "合规检查",
     ],
     "finance-tax": [
         "财务", "会计", "预算", "发票", "报销", "账单", "理财", "税务", "纳税",
@@ -219,6 +237,13 @@ KEYWORD_MAP = {
         "小程序",
         "白屏",
         "首屏",
+        # I-4：「博客」此前不在任何分类词表，「搭建一个博客系统」在退化二
+        # 打分里仅靠泛化词「一个」（STOP_TOKEN）与 hr「招一个」词元重叠，
+        # 以 0.0357×0.75=0.0268 的噪声分误路由 hr。补词后走精确关键词命中。
+        # 子串碰撞裁决：「博客园」等站点名会连带命中——爬取类任务从
+        # conf=0 兜底变为 frontend-client，属可接受轻度偏航（有测试守护
+        # 不得落入 hr/healthcare/finance 等明显无关域）。
+        "博客",
     ],
     "backend-architecture": [
         "后端", "api", "restful", "graphql", "grpc", "微服务", "服务端", "cms",
@@ -301,13 +326,18 @@ KEYWORD_MAP = {
         # 这类任务误落 business-support 兜底导致无专家可派。
         # 注意：不单独加「评估」——security-compliance 的「安全评估」已含词元
         # "评估"，单独加会制造跨类并列并破坏同分决胜的声明序契约；改用更具体的短语。
-        "审查", "诊断", "梳理", "检查", "冲突", "问题排查", "代码检查", "合规检查",
+        "审查", "诊断", "梳理", "检查", "冲突", "问题排查", "代码检查",
+        # R7：移除「合规检查」——合规属 legal-compliance/security-compliance，
+        # 放在通用工程词里是错位。合规语义由 legal-compliance 的「合规」承接。
     ],
     # ---- 兜底：极通用词 ----
     "business-support": [
         # 「客户服务」只归 customer-support——本类是兜底类，不该持有抢具体类的词
+        # R8：移除「翻译服务」——它属 language-translation 的具体业务词，
+        # 4 字最长命中会压过 language-translation 的「翻译」(2字)，导致
+        # "提供翻译服务"被兜底类抢走。移除后「翻译」自然命中 language-translation。
         "酒店", "零售", "退货", "房地产", "旅行", "会议效率",
-        "个人成长", "翻译服务", "养殖",
+        "个人成长", "养殖",
     ],
 }
 
@@ -654,6 +684,19 @@ def llm_verdict(task_description, top_candidates, return_basis=False):
     if best_score <= 0.0:
         return (None, "heuristic") if return_basis else None
 
+    # 退化为精确相等比较：得分是浮点数，ratio 归一后才比较。
+    # 判平标记（P4，2026-11-23）：`best_score` 若只由一个候选独占，主控可以信
+    # 「分最高」；若多个候选并列，最终选择退化为「取候选顺序最靠前者」，
+    # 那一票没有任何语义依据。旧实现不暴露这个区别——主控看到 0.1667
+    # 无法判断是「唯一最高」还是「并列取首」。
+    # 实测：任务「审查并验证…插件…」两候选都是 0.1667，name_hits 分别为 1 和 2，
+    # 按顺序取了 name_hits=1 的那个。这里在候选上打 tied 标记，并在
+    # score_breakdown 里带出 tied_count，让复核者一眼看出该不该改判。
+    tied = [e for score, _idx, e in scored if score == best_score]
+    tied_count = len(tied)
+    for score, _idx, expert in scored:
+        expert["tied"] = (score == best_score and tied_count > 1)
+
     # 同分时取候选顺序最靠前者（稳定决胜，结果与输入顺序一致而非随机）
     for score, _idx, expert in scored:
         if score == best_score:
@@ -666,6 +709,10 @@ def score_breakdown(task_description, expert):
 
     主控做语义精判时靠这个明细判断 Python 的排序是否可信——
     例如「飞书集成开发工程师 desc_hits=1 命中『登录』」一眼就能看出是词面巧合。
+
+    tied（P4）：该候选是否与首名**并列最高分**。True 时最终选择退化为
+    「取候选顺序最靠前者」，那一票没有语义依据——必须按业务语义改判，
+    不能因为「它在第一位」就采信。
     """
     task_tokens = _tokenize(task_description)
     effective = {t for t in task_tokens if t not in STOP_TOKENS} or task_tokens
@@ -679,6 +726,7 @@ def score_breakdown(task_description, expert):
         "matched_in_name": sorted(name_hits),
         "matched_in_desc": sorted(desc_hits),
         "raw_score": round(_keyword_score_raw(task_tokens, expert), 4),
+        "tied": bool(expert.get("tied", False)),
     }
 
 
@@ -702,7 +750,15 @@ def build_dispatch_for_expert(expert_name, task_description, context_summary="",
             target = e
             break
     if target is None:
-        raise ValueError("未找到专家：%r" % expert_name)
+        # N-04：给出近似专家名建议，降低主控排查成本（如「后端架构市」→「后端架构师」）。
+        # 仍抛 ValueError 不静默降级——建议只是错误信息的一部分。
+        import difflib
+        names = [e.get("name") for e in all_experts if e.get("name")]
+        close = difflib.get_close_matches(expert_name or "", names, n=3, cutoff=0.5)
+        hint = ("；最接近的是：%s" % "、".join(close)) if close else ""
+        raise ValueError(
+            "未找到专家：%r%s。可用 zcode_expert_system.load_experts() 查看全部 %d 位专家名。"
+            % (expert_name, hint, len(names)))
     return dispatch_expert(target, task_description, context_summary,
                            role_prefix=role_prefix)
 
@@ -720,7 +776,9 @@ def dispatch_manager(category, task_description, selected_expert, top_candidates
     manager_result = {
         "agent": manager_id,
         "category": category,
-        "status": "dispatched",
+        # L1 修复：无专家时 status 为 no_expert（与 expert_result.skipped 对齐），
+        # 有专家时才为 dispatched/plan_ready。避免消费方误判总经理派发成功。
+        "status": "dispatched" if selected_expert else "no_expert",
         "plan": [],
         "assigned_expert": selected_expert,
         "candidates": top_candidates,
@@ -742,6 +800,17 @@ def dispatch_manager(category, task_description, selected_expert, top_candidates
         manager_result["status"] = "plan_ready"
 
     return manager_result
+
+
+def _qualified_subagent_type(expert_name):
+    """按运行平台决定子代理派发名。
+
+    Claude Code 要求 <插件名>:<frontmatter.name> 的限定形式；
+    ZCode 使用中文裸名。用 CLAUDE_PLUGIN_ROOT 是否注入作判据。
+    """
+    if os.environ.get("CLAUDE_PLUGIN_ROOT"):
+        return "zcode-expert-system:%s" % expert_name
+    return expert_name
 
 
 def dispatch_expert(selected_expert, task_description, context_summary="", role_prefix=""):
@@ -784,7 +853,7 @@ def dispatch_expert(selected_expert, task_description, context_summary="", role_
         "status": "pending_dispatch",
         "dispatch": {
             "tool": "Agent",
-            "subagent_type": expert_name,
+            "subagent_type": _qualified_subagent_type(expert_name),
             "description": f"{expert_name} 执行任务",
             "prompt": prompt,
         },
@@ -810,7 +879,11 @@ def build_context(task_id, category, manager_id, top_candidates, selected_expert
     from datetime import datetime
 
     context = {
-        "task_id": task_id or f"task-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+        # N-06：task_id 精度由秒级提升到微秒级（%f），与 context-manager.py
+        # 的 result 文件名口径（%Y%m%d-%H%M%S%f）一致。秒级下同一秒内两次
+        # 独立调用生成相同 task_id，导致 _load_context_summary 按 task_id
+        # 回填时，第二个任务读到第一个任务的历史摘要并注入派发单。
+        "task_id": task_id or f"task-{datetime.now().strftime('%Y%m%d-%H%M%S%f')}",
         "category": category,
         "manager_id": manager_id,
         "top_candidates": top_candidates,
@@ -892,7 +965,7 @@ def zcode_expert_system(task_description, task_id=None, persist=True):
     # 获取该分类下的所有专家
     candidates = get_experts_by_category(category)
 
-    # 分类完全无信号时，不再往下挑专家。
+# 分类完全无信号时，不再往下挑专家。
     # 理由：conf=0 说明任务描述与 32 个分类毫无匹配，此时在 DEFAULT_CATEGORY
     # 里挑专家只能靠泛化词的微小词元重叠（实测「写个季度汇报」会选中
     # 旅行规划师，score=0.067），属于纯粹的数字巧合，不是相关性判断。
@@ -913,6 +986,15 @@ def zcode_expert_system(task_description, task_id=None, persist=True):
         for e in top_candidates:
             e["score"] = round(_keyword_score(_task_tokens_for_score, e), 4)
             e["score_detail"] = score_breakdown(task_description, e)
+
+    # H2 修复：分类置信度 >0 但无匹配专家时，显式暴露矛盾，避免满分置信度误导消费方。
+    # 仅当 confidence>0 且 selected_expert is None 时置 no_expert=True，并把 confidence
+    # 降为 0.0（与 conf=0 的「无信号」语义对齐），同时 semantic_selection_required
+    # 仍为 True（LLM 不可用时精判仍待主控）。这样消费方按 conf 判断不会误判满分。
+    no_expert = False
+    if confidence > 0.0 and selected_expert is None:
+        no_expert = True
+        confidence = 0.0
 
     # 语义精判是否仍待主控完成：LLM 不可用时 Python 的挑选只是词元计数，
     # 不是语义判断。必须显式暴露，否则主控会直接采信错误结果。
@@ -982,6 +1064,17 @@ def zcode_expert_system(task_description, task_id=None, persist=True):
             % (confidence, LOW_CONFIDENCE_THRESHOLD, category,
                ("，备选：" + "、".join(alternatives)) if alternatives else "")
         )
+    # P4：判平必须说出口——同分时 selected_expert 只是「候选顺序靠前者」，
+    # 那一票没有语义依据。不说出来，主控会把并列当唯一最高直接采信。
+    tied_names = [e.get("name") for e in top_candidates if e.get("tied")]
+    if len(tied_names) > 1:
+        warnings.append(
+            "判平：最高分 %.4f 由 %d 位候选并列（%s），selected_expert 只是"
+            "「候选顺序最靠前者」——这一票没有语义依据，必须按业务语义改判，"
+            "不得因它在第一位而采信。"
+            % (max([e.get("score") or 0 for e in top_candidates] or [0]),
+               len(tied_names), "、".join(n for n in tied_names if n))
+        )
     if warnings:
         routing_warning = " ".join(warnings)
 
@@ -990,6 +1083,12 @@ def zcode_expert_system(task_description, task_id=None, persist=True):
         "confidence": confidence,
         "alternatives": alternatives,
         "routing_warning": routing_warning,
+        # H2 修复标记：分类置信度>0 但无匹配专家时置 True，消费方据此不得按 conf 直接派发
+        "no_expert": no_expert,
+        # 判平标记（P4）：最高分是否由多个候选并列——True 时 selected_expert
+        # 的取胜依据是「候选顺序」而非分值，主控必须改判或明示采信理由。
+        # 的取胜依据是「候选顺序」而非分值，主控必须改判或明示采信理由。
+        "score_tied": len([e for e in top_candidates if e.get("tied")]) > 1,
         # 语义精判是否仍待主控完成（True 时不得直接采信 selected_expert）
         "semantic_selection_required": semantic_selection_required,
         # 本次选择的依据：semantic=模型判过 / heuristic=词元计数 / none=无候选

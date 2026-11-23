@@ -27,7 +27,7 @@ name: wf-verify
 ## 终审
 
 ```bash
-bash "${ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/sdd/review-package" <plan> <MERGE_BASE> <HEAD>     # 有 git
+bash "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/sdd/review-package" <plan> <MERGE_BASE> <HEAD>     # 有 git
 ```
 
 用 `references/roles/reviewer.md` 模板（双结论：spec 符合性 + 代码质量），最强档专家。审查报告写 `review-<N>.md`，对照 `templates/review-report.md` 输出。
@@ -88,6 +88,6 @@ Ruling: <决断> — <理由> — <错了的代价>
 | wave 后仍 open | 残余裁决 → 汇报老板 |
 | 验证红 | 回 S5，不得带红进 S7 |
 
-核对：`${ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/workflow_check.py --change <n> --plan <plan.md>`
+核对：`${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/workflow_check.py --change <n> --plan <plan.md>`
 
 下一阶段：`/wf:deliver`

@@ -1227,13 +1227,22 @@ def check_S8(ctx, rep, wf):
     status_path = os.path.join(ctx["change_dir"], ".status.json")
     status_text = read(status_path)
     parked_from_status = False
+    status_corrupt = False
     if status_text is not None:
         try:
             status = json.loads(status_text)
         except (json.JSONDecodeError, ValueError):
+            # M3 修复：损坏的 .status.json 必须产 malformed FAIL，不得静默置 {} 放行
+            # （W8：PARKED 默认禁归档；元数据损坏时无法确认，必须显式告警）
+            status_corrupt = True
             status = {}
         parked_from_status = _status_flag(status, "parked", "PARKED")
-    if parked_from_status:
+    if status_corrupt:
+        rep.add(label, "无 PARKED 残留（W8）", FAIL,
+                "[malformed:status_json] .status.json 存在但无法解析——"
+                "无法确认是否有 PARKED 残留，须修复元数据",
+                id="S8.PARKED", reason="malformed:status_json")
+    elif parked_from_status:
         rep.add(label, "无 PARKED 残留（W8）", FAIL,
                 "[forbidden:parked] .status.json 中 parked=true——默认禁归档，须迁出到新 change",
                 id="S8.PARKED", reason="forbidden:parked")
@@ -1858,11 +1867,15 @@ def _apply_ledger_scale_conflict(ctx, rep, wf, scale_key):
         return
     order = {k: i for i, k in enumerate(scale_keys(wf))}
     downgrade = order.get(scale_key, 99) < order.get(recorded, -1)
+    # M1 修复：降级时产独立 reason=ratchet_downgrade，使门禁报告可机械识别降级；
+    # 升级（非降级冲突）保持原 malformed:scale_conflict。两者均 FAIL，但 reason 区分。
     rep.add(gate_label(wf, "S0"), "规模与账本一致", FAIL,
-            "[malformed:scale_conflict] 账本记录 scale=%s，而 --scale=%s%s；"
+            "[malformed:%s] 账本记录 scale=%s，而 --scale=%s%s；"
             "规模只能升级不能降级——请修正 --scale 或更新账本"
-            % (recorded, scale_key, "（疑似降级）" if downgrade else ""),
-            id="S0.SCALE_CONFLICT", reason="malformed:scale_conflict")
+            % ("ratchet_downgrade" if downgrade else "scale_conflict",
+               recorded, scale_key, "（疑似降级）" if downgrade else ""),
+            id="S0.SCALE_CONFLICT",
+            reason="ratchet_downgrade" if downgrade else "malformed:scale_conflict")
 
 
 def main(argv=None):

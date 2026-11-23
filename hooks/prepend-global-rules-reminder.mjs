@@ -71,7 +71,7 @@ const REMINDER = [
   '【专家体系路由】所有任务都必须先走 zcode-expert-system 两轴路由（先规模后域），由 triage 的分诊结论决定派谁——任务是否「看起来像领域任务」不是主控的自判项。不得跳过域路由（W10）。',
   '判定顺序（先规模后域，与全局规则 Step1→Step2 一致）：',
   '① 先跑 zcode_dev_workflow.py triage（已双轴合一：规模+领域路由一次产出）——所有任务（含只读与机械任务）都必须完成两轴分诊，不得跳过域路由；',
-  '② 看路由结果的 score_detail 做语义精判（见下【语义精判】）；含领域判断的（分析/设计/评估/诊断/审查/规划/撰写专业方案）→ 按结论派对应专家，subagent_type 填专家中文名；',
+  `② 看路由结果的 score_detail 做语义精判（见下【语义精判】）；含领域判断的（分析/设计/评估/诊断/审查/规划/撰写专业方案）→ 按结论派对应专家，subagent_type 填专家${process.env.CLAUDE_PLUGIN_ROOT ? '（格式：zcode-expert-system:中文名）' : '中文名'}；`,
   '③ 只读任务派 analyst（领域专家）只读分析，不得由主控凭通识自行分析；',
   '④ 「机械任务」仅限纯格式转换/批量执行类操作；一旦需要领域解释或决策 → 升级为派专家，不得凭通识自行作答。复核/审查任何产出（含主控自己的产出）属于领域判断，必须派独立专家（实施者≠审查者），不得以「机械核对」名义自审；',
   '⑤ 禁止跳过域路由自行处理领域判断；确无法派专家须说明原因（路由失败走降级三件套：degraded=true + blocking）。',
@@ -120,6 +120,39 @@ function activeStageSummary(cwd) {
 }
 
 /**
+ * 读 tasks.md 勾选统计（I-06：门禁自动可见）。
+ *
+ * 活跃账本对应的 openspec/changes/<slug>/tasks.md 若存在未勾选任务，
+ * 返回 {done, todo}；读不到/不存在返回 null（fail-open，不阻断）。
+ *
+ * 口径与 openspec_engine.count_task_checkboxes / workflow_check.count_checkboxes
+ * 一致：空框 [] 算未完成，仅 x/X 算完成。
+ */
+function taskCheckboxStats(ledger, rootDir) {
+  try {
+    // 账本目录名即 change slug（.superpowers/sdd/<slug>/progress.md）
+    const slug = ledger.split(/[\\/]/).slice(-2, -1)[0];
+    if (!slug) return null;
+    // tasks.md 在仓库根的 openspec/changes/<slug>/tasks.md
+    const tasksPath = join(rootDir, 'openspec', 'changes', slug, 'tasks.md');
+    if (!existsSync(tasksPath)) return null;
+    const text = readFileSync(tasksPath, 'utf8');
+    let done = 0;
+    let todo = 0;
+    for (const line of text.split(/\r?\n/)) {
+      const m = line.match(/^\s*(?:[-*+]|\d{1,9}[.)])\s*\[([^\]]*)\]/);
+      if (!m) continue;
+      const mark = (m[1] || '').trim().toLowerCase();
+      if (mark === 'x') done += 1;
+      else todo += 1;
+    }
+    return { done, todo };
+  } catch {
+    return null;                       // 读失败 fail-open
+  }
+}
+
+/**
  * 尝试从单个 sdd 目录读出一行摘要。
  * 返回空串表示「本层没有可用账本」——调用方据此继续上溯。
  *
@@ -128,6 +161,10 @@ function activeStageSummary(cwd) {
  * 跳过两类：①openspec/changes/archive/<name> 已存在（已归档）；
  * ②progress.md 前 60 行 `Overall Status` 为 DONE/PARKED/COMPLETE（终态）。
  * 判定失败按未终态处理（fail-open，不阻断上溯）。
+ *
+ * **I-06 门禁可见**：若活跃账本对应的 tasks.md 存在未勾选任务，
+ * 摘要追加明确告警——让「任务未完成却要交付/归档」在每轮都可见，
+ * 而不必依赖主控主动调用 /wf:check。仍 fail-open，不阻断输入。
  */
 function summaryFromSddDir(sddDir, archiveRoot) {
   let entries;
@@ -191,13 +228,21 @@ function summaryFromSddDir(sddDir, archiveRoot) {
   if (!phase && !status) return '';   // 账本有效但无阶段字段 → 继续上溯
 
   const slug = best.split(/[\\/]/).slice(-2, -1)[0];
+  // I-06：账本根目录 = sddDir 上两级（.superpowers/sdd → 仓库根）
+  const rootDir = join(sddDir, '..', '..');
+  const stats = taskCheckboxStats(best, rootDir);
+  let gateLine = '继续前先核证据与 tasks.md 勾选是否一致（不一致先修再派）。';
+  if (stats && stats.todo > 0) {
+    gateLine = `⚠️ tasks.md 尚有 ${stats.todo} 项未勾选（已完成 ${stats.done}）：`
+      + '未完成不得交付/归档。交付或归档前必须先完成或显式 PARKED 未完成项。';
+  }
   return [
     '【当前工作流】',
     `账本: ${slug}`,
     phase ? `阶段: ${phase}` : '',
     scale ? `规模: ${scale}` : '',
     status ? `状态: ${status}` : '',
-    '继续前先核证据与 tasks.md 勾选是否一致（不一致先修再派）。',
+    gateLine,
   ].filter(Boolean).join(' · ');
 }
 

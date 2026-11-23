@@ -639,3 +639,99 @@ def test_states_summary_output_has_no_dead_field_keys():
         "states_summary 误删了 transitions/invariants"
     assert "states" in summary and "sdd_report_mapping" in summary, \
         "states_summary 误删了 states/sdd_report_mapping"
+
+
+# ===========================================================================
+# I-1（2026-11-22）：zcode_dev_workflow.py 内部信号词表间一致性
+#
+# 抓的破坏：**同族动词在多张表登记、唯主表缺席**。「搭建/建设」在
+# FEATURE_CONTEXT（新功能语境表）与 NEW_BUILD_VERBS（能力词守卫）都有
+# 登记，唯 WRITE_SIGNALS 主表缺失——「搭建一个博客系统」误判只读，
+# 合规跳过 S1-S8 全部门禁。这是 I-04「变更」缺陷的完全同构复发：
+# 变更/改变当时同样只登记了语境表、主表缺席。
+#
+# 约束（架构师裁定）：规模轴与领域轴分表正交，本测试只做
+# zcode_dev_workflow.py 内部三表（FEATURE_CONTEXT / NEW_BUILD_VERBS /
+# WRITE_SIGNALS）的一致性，**不引入对 zcode_expert_system.GENERIC_TOKENS
+# 的跨文件强耦合**（「搭建/建设/处理」在 GENERIC_TOKENS 是泛化降权词，
+# 与写动作主表是两个正交关注点，字面同步没有语义意义）。
+# ===========================================================================
+
+# FEATURE_CONTEXT 尾部 7 个成员是**名词**（「设计一个机制」的名词尾巴），
+# 作为「新功能语境」词正当存在——句子不含动词也应把 Bug 语境中和掉，
+# 不要求进 WRITE_SIGNALS。豁免必须显式列举，防止静默漏网。
+FEATURE_CONTEXT_NOUNS = ("机制", "策略", "规则", "流程", "页面", "模块", "功能")
+
+# 显式豁免清单：字面不在 WRITE_SIGNALS 的实施类动词，逐个记录原因。
+# 两个语义不同的桶，新词必须登记进其一，否则一致性测试报红。
+VERB_SUBSTR_COVERED = {
+    # 「增加/添加」含单字「加」、「写一个/写个」含单字「写」：
+    # write_hits 按子串命中单字，行为正常（实测「增加日志功能」
+    # 「写一个登录页面」→ light）。
+    "增加": "单字「加」子串覆盖（write_hits 命中「加」）",
+    "添加": "单字「加」子串覆盖",
+    "写一个": "单字「写」子串覆盖（实测「写一个登录页面」→ light）",
+    "写个": "单字「写」子串覆盖",
+}
+VERB_KNOWN_GAPS = {
+    # 2026-11-22 实测发现的**同形态真缺陷**（与「搭建」缺主表完全同构）：
+    # 零覆盖复合词（无单字子串可用），行为确有误判——
+    #   「做一个登录页面」→ readonly；「新增日志功能」→ readonly
+    # 修复（加入 WRITE_SIGNALS）待老板决策；决策后应转入 WRITE_SIGNALS
+    # 并从本清单移除。此处豁免只是把已知缺口**显式留档**，不是宣称正当。
+    "做一个": "已知缺口：零覆盖复合词（实测「做一个登录页面」误判只读），修复待决策",
+    "做个": "已知缺口：同「做一个」",
+    "新增": "已知缺口：零覆盖复合词（实测「新增日志功能」误判只读），修复待决策",
+}
+
+
+def test_new_build_verbs_registered_in_write_signals():
+    """NEW_BUILD_VERBS 的实施类动词必须也在 WRITE_SIGNALS 主表登记。
+
+    NEW_BUILD_VERBS 是「能力词 + 新建动词 → 不判 Bug」的守卫表；若守卫表
+    认得这个词而主表不认，含该词的句子即使不判 Bug 也会因「无写动作」
+    误判只读——守卫表的存在就失去了意义。
+
+    重建缺陷验证：从 WRITE_SIGNALS 移除「搭建」本测试即红（「搭建」
+    不在任何豁免清单）——正是 I-N-NEW 缺陷形态。
+    """
+    missing = [v for v in wf.NEW_BUILD_VERBS
+               if v not in wf.WRITE_SIGNALS
+               and v not in VERB_SUBSTR_COVERED
+               and v not in VERB_KNOWN_GAPS]
+    assert not missing, (
+        "NEW_BUILD_VERBS 中这些实施动词未在 WRITE_SIGNALS 登记"
+        "（同「搭建」缺陷形态，会误判只读）：\n  %s"
+        % "\n  ".join(missing))
+
+
+def test_feature_context_verbs_registered_in_write_signals():
+    """FEATURE_CONTEXT 的动词成员（名词豁免外）必须也在 WRITE_SIGNALS 登记。
+
+    FEATURE_CONTEXT 是「新功能语境」中和判定源；语境表登记了动词、
+    主表却缺席，意味着「新功能语境」永远等不来对应的写动作命中——
+    句子会被「未命中任何写动作信号」拦成只读，语境中和形同虚设。
+    """
+    verbs = [w for w in wf.FEATURE_CONTEXT if w not in FEATURE_CONTEXT_NOUNS]
+    missing = [v for v in verbs
+               if v not in wf.WRITE_SIGNALS
+               and v not in VERB_SUBSTR_COVERED
+               and v not in VERB_KNOWN_GAPS]
+    assert not missing, (
+        "FEATURE_CONTEXT 中这些实施动词未在 WRITE_SIGNALS 登记"
+        "（名词豁免外，同「搭建」缺陷形态）：\n  %s"
+        % "\n  ".join(missing))
+
+
+def test_seed_defect_verbs_are_hard_registered():
+    """种子清单：历次实证缺陷动词必须**字面**在 WRITE_SIGNALS（不得进豁免）。
+
+    每个种子对应一次实证「误判只读、跳过全部门禁」的事故：
+      - 变更 / 改变：I-04（「数据模型变更」误判只读）
+      - 搭建 / 建设：I-N-NEW（「搭建一个博客系统」误判只读）
+    种子成员永不进入 VERB_SUBSTR_COVERED / VERB_KNOWN_GAPS——
+    豁免只允许给「行为已被单字覆盖」或「已留档待决策」的词。
+    """
+    seeds = ("变更", "改变", "搭建", "建设")
+    missing = [v for v in seeds if v not in wf.WRITE_SIGNALS]
+    assert not missing, "种子动词缺失（防复发锚被拔）：%s" % missing

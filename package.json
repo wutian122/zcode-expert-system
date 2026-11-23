@@ -1,7 +1,8 @@
 {
   "name": "zcode-expert-system",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "description": "ZCode Expert System v3.2 - 331 experts in 32 categories with two-axis routing (scale -> nine-stage workflow, domain -> expert). OpenSpec + Superpowers + multi-agent + TDD fusion.",
+  "icon": "https://cdn.jsdelivr.net/gh/wutian122/zcode-expert-system@main/icon.png",
   "main": "bin/cli.js",
   "bin": {
     "zcode-expert-system": "bin/cli.js"
@@ -9,7 +10,12 @@
   "scripts": {
     "deploy": "node scripts/install.js",
     "deploy:dry": "node scripts/install.js --dry-run",
-    "uninstall": "node scripts/install.js --uninstall"
+    "uninstall": "node scripts/install.js --uninstall",
+    "uninstall:zcode": "node scripts/install.js --uninstall --zcode",
+    "uninstall:claude": "node scripts/install.js --uninstall --claude-code",
+    "cc:install": "node scripts/install-claude-code.js",
+    "cc:install:dry": "node scripts/install-claude-code.js --dry-run",
+    "cc:uninstall": "node scripts/install-claude-code.js --uninstall"
   },
   "keywords": [
     "zcode",
@@ -27,6 +33,7 @@
   },
   "files": [
     ".zcode-plugin/",
+    "icon.png",
     "scripts/install.js",
     "scripts/openspec_engine.py",
     "scripts/workflow_check.py",

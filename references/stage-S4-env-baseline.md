@@ -1,6 +1,7 @@
 # S4 · 环境准备与基线测试
 
 **门禁**：G4 ｜ **证据级**：P3 + P4 ｜ **角色**：Orchestrator
+**组件**：baseline-test（见 config/workflow.json 的 component_registry）
 
 > **本体系不使用 Git Worktree**（老板决策）。本阶段只做环境探测 + 基线测试 + 账本初始化。
 > 并行实施能力因此取消——见 SKILL.md 第六章守恒关系。

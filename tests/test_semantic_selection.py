@@ -29,6 +29,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import zcode_expert_system as zes  # noqa: E402
 
 
+def _valid_subagent_types():
+    """子代理派发名的合法集合（中文裸名 + Claude Code 限定名）。
+
+    ZCode 环境：中文裸名（如「后端架构师」）
+    Claude Code 环境：插件名:中文名（如「zcode-expert-system:后端架构师」）
+    """
+    import json
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "experts.json")
+    with open(path, "r", encoding="utf-8") as f:
+        names = set(e["name"] for e in json.load(f)["experts"])
+    return names | {f"zcode-expert-system:{n}" for n in names}
+
+
 # ---------------------------------------------------------------------------
 # 1. 语义精判契约：Python 不得静默冒充语义判断
 # ---------------------------------------------------------------------------
@@ -92,7 +105,9 @@ def test_manual_override_supported():
     )
     # 直接指定一个专家名
     out = zes.build_dispatch_for_expert("后端架构师", "实现用户登录接口")
-    assert out["dispatch"]["subagent_type"] == "后端架构师"
+    assert out["dispatch"]["subagent_type"] in _valid_subagent_types(), (
+        "subagent_type=%r 不是合法派发名" % out["dispatch"]["subagent_type"]
+    )
     assert out["status"] == "pending_dispatch"
 
 
@@ -107,6 +122,39 @@ def test_build_dispatch_for_expert_专家名不存在抛ValueError():
     assert "不存在的专家名XYZ" in str(exc.value), (
         "ValueError 消息应包含所传的专家名，实际：%s" % str(exc.value)
     )
+
+
+def test_qualified_subagent_type_by_platform():
+    """平台探测：Claude Code 环境输出限定名，ZCode 环境保持中文裸名。
+
+    - CLAUDE_PLUGIN_ROOT 存在（Claude Code）→ zcode-expert-system:<中文名>
+    - CLAUDE_PLUGIN_ROOT 不存在（ZCode / CI）→ 中文裸名
+    """
+    import os as _os
+    _orig = _os.environ.get("CLAUDE_PLUGIN_ROOT")
+
+    try:
+        # Claude Code 环境：设置 CLAUDE_PLUGIN_ROOT
+        _os.environ["CLAUDE_PLUGIN_ROOT"] = "/tmp/fake-plugin-root"
+        out = zes.build_dispatch_for_expert("后端架构师", "测试任务")
+        assert out["dispatch"]["subagent_type"] == "zcode-expert-system:后端架构师", (
+            "Claude Code 环境下 subagent_type 应为 zcode-expert-system:后端架构师，"
+            "实际 %r" % out["dispatch"]["subagent_type"]
+        )
+
+        # ZCode 环境：清除 CLAUDE_PLUGIN_ROOT
+        _os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+        out = zes.build_dispatch_for_expert("后端架构师", "测试任务")
+        assert out["dispatch"]["subagent_type"] == "后端架构师", (
+            "ZCode 环境下 subagent_type 应为后端架构师，"
+            "实际 %r" % out["dispatch"]["subagent_type"]
+        )
+    finally:
+        # 恢复原始环境变量
+        if _orig is not None:
+            _os.environ["CLAUDE_PLUGIN_ROOT"] = _orig
+        else:
+            _os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
 
 
 # ---------------------------------------------------------------------------
@@ -151,3 +199,50 @@ def test_existing_hr_cases_still_work():
     for text in ("招聘一个后端工程师", "员工绩效怎么考核", "培训计划怎么排"):
         cat, _conf, _alts = zes.classify_task_detailed(text)
         assert cat == "hr", "「%s」应仍为 hr，实际 %s" % (text, cat)
+
+
+# ---------------------------------------------------------------------------
+# 2. 领域词缺口：「博客」类内容平台词（2026-11-22）
+# ---------------------------------------------------------------------------
+
+BLOG_FRONTEND = [
+    ("搭建一个博客系统", {"frontend-client"}),
+    ("写一个博客系统", {"frontend-client"}),
+    ("做一个个人博客", {"frontend-client"}),
+]
+
+
+@pytest.mark.parametrize("text,expected", BLOG_FRONTEND,
+                         ids=[t for t, _ in BLOG_FRONTEND])
+def test_blog_system_routes_to_frontend_client(text, expected):
+    """博客类任务必须路由到 frontend-client，不得被泛化词噪声决胜。
+
+    修复前：「搭建一个博客系统」→ hr（conf=0.0268）——「博客」不在任何
+    词表，hr/ai-llm 仅因泛化词「一个」（STOP_TOKEN，来自「招一个」的
+    二元组）并列 0.0357×0.75 折半胜出。典型「矮子里将军」：唯一命中的
+    词元是零区分度的泛化词，却仍产出「伪领域」结论。
+
+    conf 护栏同断言：修复后必须 ≥0.5（LOW_CONFIDENCE_THRESHOLD），
+    不再依赖微弱噪声得分。
+    """
+    cat, conf, _alts = zes.classify_task_detailed(text)
+    assert cat in expected, "「%s」应路由到 %s，实际 %s（conf=%s）" % (
+        text, sorted(expected), cat, conf)
+    assert conf >= zes.LOW_CONFIDENCE_THRESHOLD, (
+        "「%s」conf=%s < 0.5——泛化词噪声决胜仍在（应为词表精确命中）" % (text, conf))
+
+
+def test_blog_word_substring_collision_is_bounded():
+    """「博客」入 frontend-client 词表后的子串碰撞不得越过显式领域词。
+
+    「博客」会子串命中「博客园」（站点名，如「爬取博客园文章」是爬虫
+    任务）——接受轻度偏航（frontend-client 优于 0 信号兜底），但必须
+    守住两条底线：
+      1. 不得落入与站点爬取明显无关的领域（hr / healthcare / finance）；
+      2. 显式后端/数据词共存时，等长并列由声明序裁决，行为须稳定可预期。
+    """
+    unrelated = ["爬取博客园热门文章", "博客园怎么爬取"]
+    for text in unrelated:
+        cat, _conf, _alts = zes.classify_task_detailed(text)
+        assert cat not in ("hr", "healthcare", "finance"), (
+            "「%s」被误路由到 %s（子串碰撞越界）" % (text, cat))

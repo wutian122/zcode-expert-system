@@ -158,10 +158,32 @@ class ExpertContext:
         return result_file
 
     def _generate_summary(self, result):
-        result_str = json.dumps(result, ensure_ascii=False)
-        if len(result_str) > 200:
-            return result_str[:200] + "..."
-        return result_str
+        """生成路由结果的语义摘要（L2 修复）。
+
+        旧实现：json.dumps(result) 后硬截 200 字符 —— 产出断头 JSON 片段，
+        既不可解析也不含关键信息，摘要名不副实。
+        新实现：提取 category/selected_expert/created_at 等关键字段生成短句摘要，
+        可被主控/模型快速理解；若 result 非 dict 则退化为 json.dumps 截断。
+        """
+        if not isinstance(result, dict):
+            result_str = json.dumps(result, ensure_ascii=False)
+            return result_str[:200] + "..." if len(result_str) > 200 else result_str
+        parts = []
+        if result.get("category"):
+            parts.append("分类=%s" % result["category"])
+        if result.get("selected_expert"):
+            exp = result["selected_expert"]
+            name = exp.get("name") if isinstance(exp, dict) else str(exp)
+            parts.append("专家=%s" % name)
+        elif result.get("no_expert") or (result.get("confidence") == 0.0 and result.get("selected_expert") is None):
+            parts.append("专家=无")
+        if result.get("created_at"):
+            parts.append("时间=%s" % result["created_at"])
+        if not parts:
+            # 无可提取字段时退化为短 JSON
+            result_str = json.dumps(result, ensure_ascii=False)
+            return result_str[:200] + "..." if len(result_str) > 200 else result_str
+        return "；".join(parts)
 
     def _maybe_compress(self, task_id):
         """当上下文摘要长度超过阈值时，对早期步骤进行 LLM 摘要压缩。"""

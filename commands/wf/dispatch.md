@@ -10,7 +10,7 @@ name: wf-dispatch
 ## 执行
 
 ```bash
-python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/zcode_dev_workflow.py" plan "<任务描述>" --files N
+python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/zcode_dev_workflow.py" plan "<任务描述>" --files N
 ```
 
 ## 输出结构
@@ -67,6 +67,20 @@ Agent(
 显式降级三件套（不得静默）：`domain.degraded=true` + `plan.blocking` 非空 + 派发行 note 如实陈述。
 `general-purpose` 只承接机械执行——**领域结论禁由通用代理产出**（W10），
 须问老板澄清领域，或用 `build_dispatch_for_expert(专家名, task)` 指定后重跑。
+
+## 语义精判分级处置（I-02 / I-03）
+
+`semantic_selection_required=true`（Python 侧 `selection_basis=heuristic`，专家由词元计数选出）时，按**分类置信度**分两档：
+
+| 条件 | 处置 |
+|---|---|
+| `confidence < 0.5`（`LOW_CONFIDENCE_THRESHOLD`） | **阻断实施者派发**：plan 含 `action: blocked_low_confidence`，不派 implementer/reviewer；`plan.blocking` 强制。分类本身不可靠，词元兜底专家与任务语义无关（如「支付幂等性」落 hr「招聘专家」）。必须先向老板澄清领域 |
+| `confidence >= 0.5` | **保留派发**，但 plan 含 `action: semantic_recheck`——主控**必须**复核 `domain.top_candidates[].score_detail`，按业务语义定夺；要改判用 `build_dispatch_for_expert(专家名, task)` |
+
+> 词元巧合实例：「修复用户登录接口的鉴权 bug」→ 后端架构 conf=1.0，却因 prompt 里出现过「登录」二字选中「飞书集成开发工程师」。
+> 这正是 `semantic_recheck` 存在的理由——conf=1.0 只说明**领域**判对，不说明**专家**选对。
+>
+> `token`/`jwt`/`oauth` 按声明序落 security-compliance；若实为「实现/刷新/接入」等功能开发，应改判 backend-architecture。
 
 ## 只读任务为什么没有 reviewer
 

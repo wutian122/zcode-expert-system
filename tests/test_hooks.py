@@ -235,6 +235,57 @@ def test_ascends_past_empty_sdd_dir(workspace):
         "空 sdd 目录截断了上溯；实际上下文末尾：\n%s" % ctx[-400:])
 
 
+# ===========================================================================
+# I-06：tasks.md 未完成必须在每轮提醒中可见（门禁自动可见）
+# ===========================================================================
+
+def write_tasks(base, slug, body):
+    """在 base/openspec/changes/<slug>/tasks.md 写勾选夹具。"""
+    d = base / "openspec" / "changes" / slug
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "tasks.md").write_text(body, encoding="utf-8", newline="\n")
+
+
+def test_unchecked_tasks_warns_each_turn(workspace):
+    """I-06：账本对应 tasks.md 有未勾选任务时，摘要必须显式告警。
+
+    修复前门禁只在手动 /wf:check 时运行；hook 只输出通用提醒，
+    「任务未完成却要交付/归档」不会在每轮可见。
+    """
+    ws, _sub = workspace
+    write_ledger(ws, name="plan-a")
+    write_tasks(ws, "plan-a", "- [x] 已完成任务\n- [ ] 未完成任务\n")
+
+    proc = run_hook({"prompt": "继续", "cwd": str(ws)})
+    assert proc.returncode == 0
+    ctx = additional_context(proc)
+    assert "未勾选" in ctx, "tasks.md 有未完成任务时必须在上下文里告警；实际：\n%s" % ctx[-600:]
+    assert "1" in ctx, "告警应包含未完成数量"
+
+
+def test_all_checked_tasks_no_warning(workspace):
+    """I-06：tasks.md 全部勾选时不得出现未完成告警。"""
+    ws, _sub = workspace
+    write_ledger(ws, name="plan-b")
+    write_tasks(ws, "plan-b", "- [x] 任务一\n- [x] 任务二\n")
+
+    proc = run_hook({"prompt": "继续", "cwd": str(ws)})
+    assert proc.returncode == 0
+    ctx = additional_context(proc)
+    assert "未勾选" not in ctx, "全部完成时不应告警；实际：\n%s" % ctx[-600:]
+
+
+def test_missing_tasks_no_warning(workspace):
+    """I-06：无 tasks.md 时不告警（fail-open，不阻断）且 hook 正常退出。"""
+    ws, _sub = workspace
+    write_ledger(ws, name="plan-c")
+    proc = run_hook({"prompt": "继续", "cwd": str(ws)})
+    assert proc.returncode == 0
+    ctx = additional_context(proc)
+    assert "未勾选" not in ctx
+    assert "【当前工作流】" in ctx, "无 tasks.md 时摘要仍应输出"
+
+
 def test_ascends_past_sdd_dir_without_ledger(workspace):
     """子目录的 sdd 下有子目录但没有 progress.md → 同样继续上溯。
 

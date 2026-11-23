@@ -29,7 +29,8 @@ def run(*args, root=None):
         cmd += ["--root", str(root)]
     cmd += list(args)
     return subprocess.run(cmd, capture_output=True, text=True, shell=False,
-                          cwd=str(root) if root else None)
+                          cwd=str(root) if root else None,
+                          encoding='utf-8', errors='replace')
 
 
 def test_new_change_创建目录和元数据(tmp_path):
@@ -344,6 +345,61 @@ def test_archive_change_PARKED禁止归档(tmp_path):
     (cdir / ".status.json").write_text(json.dumps(status, ensure_ascii=False), encoding="utf-8")
     r = run("archive-change", "my-change", root=tmp_path)
     assert r.returncode != 0, "archive with PARKED tasks should exit non-zero (W8)"
+
+
+# ---------- I-05：归档必须校验 tasks.md 实际勾选状态 ----------
+
+_ALL_TRUE_STATUS = {
+    "tasksCompleted": True,
+    "specsConsistent": True,
+    "testsPassed": True,
+    "reviewPassed": True,
+    "noBlockers": True,
+    "gitStatusOk": True,
+    "docsUpdated": True,
+}
+
+
+def _setup_archivable_change(tmp_path, name="my-change", tasks_md=None):
+    """建一个七标志全 true 的变更，可选写入 tasks.md。"""
+    run("new-change", name, root=tmp_path)
+    cdir = tmp_path / "openspec" / "changes" / name
+    (cdir / ".status.json").write_text(
+        json.dumps(_ALL_TRUE_STATUS, ensure_ascii=False), encoding="utf-8")
+    if tasks_md is not None:
+        (cdir / "tasks.md").write_text(tasks_md, encoding="utf-8")
+    return cdir
+
+
+def test_archive_change_tasks未勾选拒绝归档(tmp_path):
+    """I-05：tasks.md 存在未勾任务，即使七标志全 true 也必须拒绝归档。"""
+    _setup_archivable_change(
+        tmp_path, tasks_md="- [ ] 任务一\n- [ ] 任务二\n")
+    r = run("archive-change", "my-change", root=tmp_path)
+    assert r.returncode != 0, "tasks.md 有未勾任务时不得归档"
+    assert "未完成" in r.stderr or "tasks" in r.stderr.lower(), \
+        "错误信息应说明未完成的任务"
+
+
+def test_archive_change_tasks已勾选放行(tmp_path):
+    """I-05：tasks.md 全部勾选，七标志全 true，放行归档。"""
+    today = date.today().isoformat()
+    _setup_archivable_change(
+        tmp_path, tasks_md="- [x] 任务一\n- [x] 任务二\n")
+    r = run("archive-change", "my-change", root=tmp_path)
+    assert r.returncode == 0, r.stderr
+    archive_dir = tmp_path / "openspec" / "changes" / "archive" / f"{today}-my-change"
+    assert archive_dir.is_dir(), f"archive dir not created: {archive_dir}"
+
+
+def test_archive_change_tasks不存在沿用状态放行(tmp_path):
+    """I-05：tasks.md 不存在时不校验勾选（无账本可查），沿用 status 标志放行。"""
+    today = date.today().isoformat()
+    _setup_archivable_change(tmp_path)  # 不写 tasks.md
+    r = run("archive-change", "my-change", root=tmp_path)
+    assert r.returncode == 0, "无 tasks.md 时不增加校验，应放行"
+    archive_dir = tmp_path / "openspec" / "changes" / "archive" / f"{today}-my-change"
+    assert archive_dir.is_dir(), f"archive dir not created: {archive_dir}"
 
 
 def test_archive_change_dry_run不移动(tmp_path):

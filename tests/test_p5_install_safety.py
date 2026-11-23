@@ -103,7 +103,8 @@ def sandbox(tmp_path, monkeypatch):
     # 安全闸 2：node 侧（安装脚本实际读的那个）
     probe = subprocess.run(
         ["node", "-e", "process.stdout.write(require('os').homedir())"],
-        env=env, capture_output=True, text=True, timeout=30)
+        env=env, capture_output=True, text=True, timeout=30,
+        encoding='utf-8', errors='replace')
     node_home = Path(probe.stdout.strip()).resolve()
     if node_home != home:
         pytest.skip(
@@ -113,10 +114,18 @@ def sandbox(tmp_path, monkeypatch):
     return env, home
 
 
-def make_source(tmp_path, *, drop_agents=False, drop_config=False, extra=None):
+def make_source(tmp_path, *, drop_agents=False, drop_config=False, drop_icon_manifest=False, extra=None):
     """复制一份可安全修改的源树到 tmp_path/src，返回其路径。
 
     只复制安装脚本关心的目录，避免整仓拷贝（`agents/` 有 363 个文件）。
+    drop_icon_manifest=True 模拟源树缺 .claude-plugin/marketplace.json
+    （图标注入跳过分支）。
+
+    注意：**默认不拷 `.claude-plugin/plugin.json`**——deployClaudeCode 对
+    Claude Code 部署有「agents 必须是 363」的硬校验（S5 固化改造），
+    沙箱源树只有 3 个 agent，一旦 plugin.json 存在就会 exit(1)。
+    既有用例靠「manifest 缺失 → 跳过 Claude Code 部署」分支与沙箱共存；
+    I2 修复后该跳过发生在任何 rmSync 之前（连沙箱也不写）。
     """
     src = tmp_path / "src"
     for rel in ("scripts", "config", "hooks", "commands"):
@@ -127,6 +136,12 @@ def make_source(tmp_path, *, drop_agents=False, drop_config=False, extra=None):
     (src / ".zcode-plugin").mkdir()
     shutil.copy2(PROJECT_ROOT / ".zcode-plugin" / "plugin.json",
                  src / ".zcode-plugin" / "plugin.json")
+    # I4：图标 marketplace 注入依赖 .claude-plugin/marketplace.json，
+    # 缺失时 injectIconMarketplace 会跳过（函数内有告警分支）。
+    if not drop_icon_manifest:
+        (src / ".claude-plugin").mkdir()
+        shutil.copy2(PROJECT_ROOT / ".claude-plugin" / "marketplace.json",
+                     src / ".claude-plugin" / "marketplace.json")
 
     if not drop_agents:
         # 只放 3 个 agent 够验证逻辑，不必拷 363 个
@@ -147,7 +162,8 @@ def run_installer(src, env, *args, timeout=120):
     """在沙箱 HOME 下跑安装脚本。"""
     return subprocess.run(
         ["node", str(src / "scripts" / "install.js")] + list(args),
-        env=env, capture_output=True, text=True, timeout=timeout, cwd=str(src))
+        env=env, capture_output=True, text=True, timeout=timeout, cwd=str(src),
+        encoding='utf-8', errors='replace')
 
 
 def zcode(home):
@@ -368,7 +384,8 @@ def test_uninstall_without_manifest_does_not_prefix_sweep(sandbox, tmp_path):
     src = make_source(tmp_path)
     proc = subprocess.run(
         ["node", str(src / "scripts" / "install.js"), "--uninstall"],
-        env=env, capture_output=True, text=True, timeout=120, cwd=str(src))
+        env=env, capture_output=True, text=True, timeout=120, cwd=str(src),
+        encoding='utf-8', errors='replace')
     assert proc.returncode == 0, "卸载应成功：%s" % (proc.stderr or proc.stdout)[-500:]
 
     assert (agents / "expert-other-plugin.md").exists(), "误删了其他插件的 expert-*"
@@ -386,7 +403,8 @@ def test_uninstall_removes_own_artifacts(sandbox, tmp_path):
 
     proc = subprocess.run(
         ["node", str(src / "scripts" / "install.js"), "--uninstall"],
-        env=env, capture_output=True, text=True, timeout=120, cwd=str(src))
+        env=env, capture_output=True, text=True, timeout=120, cwd=str(src),
+        encoding='utf-8', errors='replace')
     assert proc.returncode == 0
 
     assert not list(agents.glob("*.md")), "卸载后仍残留 agent"
@@ -535,3 +553,308 @@ def test_vendored_uninstall_targets_only_plugin_cache():
     # 正向锚：插件缓存那条必须仍在（否则删过头，vendored 技能永不清理）
     assert "pluginRoot, 'skills'" in seg, (
         "P2-3：vendored 卸载 targets 误删了插件缓存那条（删过头）")
+
+
+# ===========================================================================
+# I4（S6 修复，2026-11-23）：图标固化功能测试
+#
+# 抓的破坏：
+# 1. injectIconMarketplace 零调用（C1：函数写完没接线，图标永不注入）
+# 2. 步骤 4 注册按名全删导致 C2 现场 wutian122 记录被误删（C2 命名空间回退）
+# 3. 卸载不对称（C3：装时注入 known/marketplace 目录/enabledPlugins，卸时不清）
+# 4. dry-run 阶段经 act()/DRY_RUN 守卫漏写（写穿防线）
+#
+# 测试形态：subprocess 驱动真实 install.js，HOME 重定向到沙箱（复用
+# sandbox fixture 的双道安全闸），绝不触碰真实 ~/.zcode。
+# ===========================================================================
+
+PLUGIN_ID = "zcode-expert-system@wutian122-expert-system"
+LEGACY_ID = "zcode-expert-system@zcode-plugins-official"
+ICON_MKT_ID = "wutian122-expert-system"
+
+
+def read_json(p):
+    return json.loads(Path(p).read_text(encoding="utf-8"))
+
+
+def known_entries(home):
+    """返回 known_marketplaces.json 中 ICON_MKT_ID 的条目数。"""
+    f = zcode(home) / "cli" / "plugins" / "known_marketplaces.json"
+    if not f.exists():
+        return 0
+    data = read_json(f)
+    return sum(1 for m in data.get("marketplaces", []) if m.get("id") == ICON_MKT_ID)
+
+
+def installed_entries(home, plugin_id):
+    """返回 installed_plugins.json 中指定 id 的记录数。"""
+    f = zcode(home) / "cli" / "plugins" / "installed_plugins.json"
+    if not f.exists():
+        return 0
+    data = read_json(f)
+    return sum(1 for p in data.get("plugins", []) if p.get("id") == plugin_id)
+
+
+def enabled_plugins(home):
+    """返回 config.json 的 plugins.enabledPlugins 字典（缺失时返回 None）。"""
+    f = zcode(home) / "cli" / "config.json"
+    if not f.exists():
+        return None
+    return read_json(f).get("plugins", {}).get("enabledPlugins")
+
+
+def test_icon_marketplace_injected_on_install(sandbox, tmp_path):
+    """C1：安装后图标 marketplace 必须真的写入（injectIconMarketplace 已接线）。
+
+    修前实测：injectIconMarketplace 零调用——函数写完但从没被 install() 调用，
+    known_marketplaces.json / marketplace 目录 / enabledPlugins 三处全部为空，
+    图标永远不显示。本用例验证接线后的落盘形态。
+    """
+    env, home = sandbox
+    src = make_source(tmp_path)
+    proc = run_installer(src, env)
+    assert proc.returncode == 0, "安装应成功：%s" % (proc.stderr or proc.stdout)[-500:]
+
+    # known_marketplaces.json 恰 1 条 wutian122 条目
+    assert known_entries(home) == 1, (
+        "known_marketplaces.json 应恰有 1 条 %s 条目，实际 %d 条"
+        % (ICON_MKT_ID, known_entries(home)))
+
+    # marketplace 实体清单与根级缓存清单都在
+    mkt = zcode(home) / "cli" / "plugins" / "marketplaces" / ICON_MKT_ID
+    assert (mkt / "marketplace.json").is_file(), "缺根级缓存清单 marketplace.json"
+    assert (mkt / ".claude-plugin" / "marketplace.json").is_file(), \
+        "缺实体清单 .claude-plugin/marketplace.json"
+    # 清单里的 icon 必须是 https 完整 URL（渲染端只认 https）
+    m = read_json(mkt / "marketplace.json")
+    icon = m["plugins"][0]["icon"]
+    assert icon.startswith("https://"), "icon 字段不是 https 完整 URL：%r" % icon
+
+    # installed_plugins 注册在 wutian122 命名空间
+    assert installed_entries(home, PLUGIN_ID) == 1
+    assert installed_entries(home, LEGACY_ID) == 0, "不应注册到 legacy 官方命名空间"
+
+
+def test_icon_marketplace_idempotent_reinstall(sandbox, tmp_path):
+    """C2 幂等：跑两次安装后 known_marketplaces 恰 1 条、addedAt 保留。
+
+    修前形态：filter 按名全删 → 第二次安装把第一次的记录删掉再 push，
+    如果实现漏了 upsert 去重还会出现 2 条。addedAt 必须跨重装保留
+    （addedAt 是「首次添加时间」，每次重装都刷新会丢历史信息）。
+    """
+    env, home = sandbox
+    src = make_source(tmp_path)
+    assert run_installer(src, env).returncode == 0
+
+    known_file = zcode(home) / "cli" / "plugins" / "known_marketplaces.json"
+    first = read_json(known_file)
+    first_added = next(m["addedAt"] for m in first["marketplaces"]
+                       if m.get("id") == ICON_MKT_ID)
+
+    assert run_installer(src, env).returncode == 0
+
+    assert known_entries(home) == 1, (
+        "重装后 known_marketplaces 应有 1 条，实际 %d 条" % known_entries(home))
+    second = read_json(known_file)
+    second_added = next(m["addedAt"] for m in second["marketplaces"]
+                        if m.get("id") == ICON_MKT_ID)
+    assert second_added == first_added, (
+        "addedAt 被重装刷新：%s → %s（应保留首次添加时间）"
+        % (first_added, second_added))
+    assert installed_entries(home, PLUGIN_ID) == 1, "重装后 installed_plugins 出现重复注册"
+
+
+def test_c2_field_wutian122_record_survives_reinstall(sandbox, tmp_path):
+    """C2 现场兼容：预置 wutian122 记录（带 custom 字段）后重装不得破坏。
+
+    C2 现场的 installed_plugins.json 已是 wutian122 命名空间、enabledPlugins
+    键已迁移。修前按名全删会把这些记录误删，导致命名空间回退。
+    本用例预置一条带标记字段的记录，重装后断言它仍然存在（且被 upsert
+    原地更新，不产生第二条）。
+    """
+    env, home = sandbox
+    src = make_source(tmp_path)
+
+    # 预置 C2 现场形态：installed_plugins 已有 wutian122 记录
+    plugins_dir = zcode(home) / "cli" / "plugins"
+    plugins_dir.mkdir(parents=True)
+    (plugins_dir / "installed_plugins.json").write_text(json.dumps({
+        "version": 1,
+        "plugins": [{
+            "id": PLUGIN_ID,
+            "name": "zcode-expert-system",
+            "marketplace": ICON_MKT_ID,
+            "version": "3.2.2",
+            "installPath": "C:/custom/path/keep-me",
+            "installedAt": "2026-11-20T00:00:00.000Z",
+            "updatedAt": "2026-11-20T00:00:00.000Z",
+            "scope": "user",
+            "source": {"source": "local", "type": "directory", "path": "zcode-expert-system"},
+            "cacheTransactionId": "keep-existing-tx",
+        }],
+    }, indent=2), encoding="utf-8")
+
+    # 预置 config.json 的 enabledPlugins 新键（显式 false，验证尊重）
+    cli_dir = zcode(home) / "cli"
+    (cli_dir / "config.json").write_text(json.dumps({
+        "plugins": {"enabledPlugins": {PLUGIN_ID: False}},
+    }, indent=2), encoding="utf-8")
+
+    proc = run_installer(src, env)
+    assert proc.returncode == 0, "安装应成功：%s" % (proc.stderr or proc.stdout)[-500:]
+
+    # wutian122 记录仍在（upsert 原地更新，无第二条）
+    assert installed_entries(home, PLUGIN_ID) == 1, (
+        "C2 现场记录被误删或重复写入（应恰 1 条）")
+    assert installed_entries(home, LEGACY_ID) == 0
+
+    # cacheTransactionId / installedAt 保留（upsert 语义：保留首装信息）
+    data = read_json(plugins_dir / "installed_plugins.json")
+    rec = next(p for p in data["plugins"] if p["id"] == PLUGIN_ID)
+    assert rec["cacheTransactionId"] == "keep-existing-tx", "upsert 丢了原 cacheTransactionId"
+    assert rec["installedAt"] == "2026-11-20T00:00:00.000Z", "upsert 丢了原 installedAt"
+    # marketplace 字段对齐到 ICON_MARKETPLACE_ID（旧 record 可能带别的值）
+    assert rec["marketplace"] == ICON_MKT_ID
+
+    # enabledPlugins 显式 false 必须保留（M3：不得被翻回 true）
+    ep = enabled_plugins(home)
+    assert ep.get(PLUGIN_ID) is False, (
+        "用户显式 false 被迁移逻辑翻回启用：%r" % ep)
+
+
+def test_uninstall_removes_icon_marketplace_symmetrically(sandbox, tmp_path):
+    """C3：卸载对称性——卸载后 known/目录/enabledPlugins 三处皆清。
+
+    修前形态：安装侧注入三处产物，卸载侧完全不清理——卸载后
+    known_marketplaces.json 留孤儿条目、marketplaces/ 目录留垃圾、
+    config.json 的 enabledPlugins 留死键。
+    """
+    env, home = sandbox
+    src = make_source(tmp_path)
+    assert run_installer(src, env).returncode == 0
+
+    # 前置断言：known 条目与 marketplace 目录都在（证明安装真的注入了）。
+    # config.json 的 enabledPlugins 只在「文件已存在」时才迁移/清理
+    # （契约：绝不重建 config.json）——新装机没有 config.json 时该字段
+    # 为 None 是正确行为，故这里不强制存在，改为在下方单独造一个
+    # 带 enabledPlugins 死键的场景来验证第三处清理。
+    assert known_entries(home) == 1
+    assert (zcode(home) / "cli" / "plugins" / "marketplaces" / ICON_MKT_ID).is_dir()
+
+    # 预置 config.json 的 enabledPlugins（模拟 C2 现场：已迁移的键），
+    # 卸载必须把它清掉（第三处对称性）
+    cli_dir = zcode(home) / "cli"
+    (cli_dir / "config.json").write_text(json.dumps({
+        "plugins": {"enabledPlugins": {PLUGIN_ID: True}},
+    }, indent=2), encoding="utf-8")
+
+    proc = subprocess.run(
+        ["node", str(src / "scripts" / "install.js"), "--uninstall", "--zcode"],
+        env=env, capture_output=True, text=True, timeout=120, cwd=str(src),
+        encoding='utf-8', errors='replace')
+    assert proc.returncode == 0, "卸载应成功：%s" % (proc.stderr or proc.stdout)[-500:]
+
+    # known_marketplaces.json：wutian122 条目已移除
+    assert known_entries(home) == 0, "卸载后 known_marketplaces 仍有孤儿条目"
+
+    # marketplace 目录已删
+    assert not (zcode(home) / "cli" / "plugins" / "marketplaces" / ICON_MKT_ID).exists(), \
+        "卸载后 marketplaces/<id> 目录仍残留"
+
+    # enabledPlugins 两个命名空间键都清了
+    ep_after = enabled_plugins(home)
+    assert ep_after is not None
+    assert PLUGIN_ID not in ep_after, "卸载后 enabledPlugins 仍有新命名空间死键"
+    assert LEGACY_ID not in ep_after, "卸载后 enabledPlugins 仍有 legacy 死键"
+
+
+def test_dry_run_icon_ops_write_nothing(sandbox, tmp_path):
+    """C1/C3 dry-run：图标注入与清理的所有写操作必须经 act() 守卫。
+
+    修前形态：dry-run 阶段的注入/清理若漏 act() 收口，会写穿防线
+    （writeFileSync / writeJsonWithBackup / mkdirSync 都是直接写）。
+    本用例先在沙箱造出 C2 现场（wutian122 记录 + 已注入 marketplace），
+    然后跑 --dry-run，断言全部写操作零发生（文件数、内容、条目数均不变）。
+    """
+    env, home = sandbox
+    src = make_source(tmp_path)
+
+    # 先真实安装一次，形成现场
+    assert run_installer(src, env).returncode == 0
+    before_files = count_files(zcode(home))
+    before_known = (zcode(home) / "cli" / "plugins" / "known_marketplaces.json").read_text(encoding="utf-8")
+    before_installed = (zcode(home) / "cli" / "plugins" / "installed_plugins.json").read_text(encoding="utf-8")
+    before_mkt = (zcode(home) / "cli" / "plugins" / "marketplaces" / ICON_MKT_ID
+                  / "marketplace.json").read_text(encoding="utf-8")
+    cli_dir = zcode(home) / "cli"
+    before_config = (cli_dir / "config.json").read_text(encoding="utf-8") if (cli_dir / "config.json").exists() else None
+
+    # 安装 dry-run
+    proc = run_installer(src, env, "--dry-run")
+    assert proc.returncode == 0, "dry-run 应成功：%s" % (proc.stderr or proc.stdout)[-400:]
+    out = proc.stdout + proc.stderr
+    assert "将注入图标 marketplace" in out, "dry-run 未打印注入计划"
+
+    # 卸载 dry-run
+    proc2 = subprocess.run(
+        ["node", str(src / "scripts" / "install.js"), "--uninstall", "--zcode", "--dry-run"],
+        env=env, capture_output=True, text=True, timeout=120, cwd=str(src),
+        encoding='utf-8', errors='replace')
+    assert proc2.returncode == 0, "卸载 dry-run 应成功：%s" % (proc2.stderr or proc2.stdout)[-400:]
+    out2 = proc2.stdout + proc2.stderr
+    assert "将清理图标 marketplace" in out2, "卸载 dry-run 未打印清理计划"
+
+    # 全部写操作零发生：文件数不变、关键文件内容不变
+    assert count_files(zcode(home)) == before_files, (
+        "dry-run 改动了磁盘文件数：%d → %d" % (before_files, count_files(zcode(home))))
+    assert (zcode(home) / "cli" / "plugins" / "known_marketplaces.json").read_text(encoding="utf-8") == before_known, \
+        "dry-run 写穿了 known_marketplaces.json"
+    assert (zcode(home) / "cli" / "plugins" / "installed_plugins.json").read_text(encoding="utf-8") == before_installed, \
+        "dry-run 写穿了 installed_plugins.json"
+    assert (zcode(home) / "cli" / "plugins" / "marketplaces" / ICON_MKT_ID
+            / "marketplace.json").read_text(encoding="utf-8") == before_mkt, "dry-run 写穿了 marketplace 清单"
+    config_after = (cli_dir / "config.json").read_text(encoding="utf-8") if (cli_dir / "config.json").exists() else None
+    assert config_after == before_config, "dry-run 写穿了 config.json"
+
+    # 无新增 .bak-<ts> 文件——文件数断言已覆盖（bak 会改变文件数），
+    # 这里补充断言 marketplace 相关无 bak 泄漏
+    assert not list((zcode(home) / "cli" / "plugins" / "marketplaces").rglob("*.bak-*")), \
+        "dry-run 在 marketplace 目录留下 .bak 残留"
+
+
+def test_manifest_missing_skips_marketplace_injection(sandbox, tmp_path):
+    """防御分支：源树缺 .claude-plugin/marketplace.json 时安装仍成功、图标跳过。
+
+    injectIconMarketplace 对缺失清单只告警不中断（图标层失败不伤功能层）。
+    """
+    env, home = sandbox
+    src = make_source(tmp_path, drop_icon_manifest=True)
+
+    proc = run_installer(src, env, "--targets", "zcode")
+    assert proc.returncode == 0, "缺清单时安装仍应成功（图标层可失败）：%s" % (proc.stderr or proc.stdout)[-500:]
+    assert known_entries(home) == 0, "缺清单时不应注入 marketplace"
+    assert installed_entries(home, PLUGIN_ID) == 1, "功能层注册不受图标层影响"
+
+
+def test_deploy_claude_code_skips_when_manifest_missing(sandbox, tmp_path):
+    """I2：缺 .claude-plugin/plugin.json 时不得先删 Claude Code 缓存再报错。
+
+    修前形态：先 rmSync(claudePluginRoot) 清掉用户已有的插件缓存，
+    再检查 manifestSrc 是否存在——manifest 缺失时用户得到
+    「旧的已删、新的没装」。正确顺序：先查 manifest，缺失即 return。
+    （make_source 默认不拷 plugin.json，天然覆盖本场景。）
+    """
+    env, home = sandbox
+    src = make_source(tmp_path)
+
+    # 预置一个「用户已有的旧版缓存」
+    stale = (home / ".claude" / "plugins" / "cache" / "claude-plugins-official"
+             / "zcode-expert-system" / "3.0.0")
+    stale.mkdir(parents=True)
+    (stale / "stale-marker.txt").write_text("用户的旧版缓存\n", encoding="utf-8")
+
+    proc = run_installer(src, env, "--targets", "claude-code")
+    assert proc.returncode == 0, "跳过 Claude Code 部署应成功返回：%s" % (proc.stderr or proc.stdout)[-500:]
+    assert (stale / "stale-marker.txt").is_file(), (
+        "manifest 缺失时 Claude Code 旧缓存被先删（先删后验未修复）")
+    assert "跳过 Claude Code 部署" in (proc.stdout + proc.stderr), "未打印跳过原因"

@@ -1,7 +1,7 @@
 ---
 name: zcode-expert-system
 description: Use when a task spans design, development, security, marketing, testing, research, finance, legal, healthcare or any other professional domain and needs routing to a specialist, or when the task is a software engineering task that needs a disciplined workflow (requirements → spec → plan → TDD → review → delivery). 331 experts in 32 top-level categories with two-axis routing (scale → workflow stages, domain → expert), nine-stage dev workflow with gates and evidence. Also use when the user says 专家 / 会诊 / 多专家 / 专业分析 / 任务路由 / 任务分解 / 工作流 / 研发流程.
-version: "3.2.1"
+version: "3.2.2"
 ---
 
 # ZCode Expert System v3.2

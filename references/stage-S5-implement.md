@@ -1,6 +1,7 @@
 # S5 · 代码实施与多 Agent 协作
 
 **门禁**：G5（每任务）｜ **证据级**：P4 → P2 ｜ **角色**：Implementer（域专家，串行）
+**组件**：zes-openspec-apply-change（见 config/workflow.json 的 component_registry）
 
 ## 执行模式（互斥，不可混用）
 

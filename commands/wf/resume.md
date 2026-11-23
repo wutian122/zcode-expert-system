@@ -12,8 +12,8 @@ name: wf-resume
 | # | 读什么 | 为什么这个位置 |
 |---|---|---|
 | 1 | 项目 `AGENTS.md` + 本地偏离登记 | 偏离项改变后续一切解释 |
-| 2 | `python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/scripts/openspec_engine.py" status --change <n>` | **唯一合法路径来源**，禁自己拼 |
-| 3 | `python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/scripts/openspec_engine.py" instructions apply --change <n>` | 拿 contextFiles + progress + sourcePath |
+| 2 | `python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py" status --change <n>` | **唯一合法路径来源**，禁自己拼 |
+| 3 | `python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py" instructions apply --change <n>` | 拿 contextFiles + progress + sourcePath |
 | 4 | `tasks.md` | 只做勾选快照，**不作结论** |
 | 5 | `progress.md` **首行** | 归属确认；不匹配 → 不是你的账本，另建 |
 | 6 | `progress.md` 全文 | 阶段/任务表/Blockers/最后修复轮/全部 Ruling |
@@ -56,4 +56,4 @@ name: wf-resume
 - **不得重派已完成任务**（这是 SDD 最贵的失败）
 - 不匹配的账本**不覆盖**，另建
 
-核对：`${ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/workflow_check.py --change <n> --plan <plan.md>`
+核对：`${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/workflow_check.py --change <n> --plan <plan.md>`

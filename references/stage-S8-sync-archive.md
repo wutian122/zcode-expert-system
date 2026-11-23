@@ -1,6 +1,7 @@
 # S8 · 规格同步与归档
 
 **门禁**：G8b（**停老板**）｜ **证据级**：P2 ｜ **角色**：Orchestrator
+**组件**：zes-openspec-sync-specs、zes-openspec-archive-change（见 config/workflow.json 的 component_registry）
 
 ## 顺序（不可颠倒）
 
@@ -70,9 +71,14 @@ python scripts/openspec_engine.py validate-specs
 - [ ] Git/交付状态符合要求
 - [ ] 必要文档已更新
 
+> **I-05：七条件不是全部。** `archive-change` 在七标志之外**强制核对 `tasks.md` 实际勾选**——
+> 只要存在未勾选任务（`- [ ]`），即使 `.status.json` 七个标志全为 true 也拒绝归档（rc≠0）。
+> 七个标志是手工维护的元数据，会与真实进度脱钩；`tasks.md` 勾选才是账本真相。
+> `tasks.md` 不存在时不额外校验（无账本可查，沿用七标志）。
+
 ### 完成度口径
 
-只认 `python scripts/openspec_engine.py list` 输出的任务完成数（`tasks.md` 的 `- [x]` / `- [X]`），**仅 `x`/`X` 算完成**。
+只认 `python scripts/openspec_engine.py list` 输出的任务完成数（`tasks.md` 的 `- [x]` / `- [X]`），**仅 `x`/`X` 算完成**，空框 `[ ]` 与异形标记（`[~]` 等）一律算未完成。
 
 ### 归档动作
 

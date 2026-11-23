@@ -33,7 +33,8 @@ def run_check(*args, root=None):
     cmd = [sys.executable, str(WKC)]
     cmd += list(args)
     return subprocess.run(cmd, capture_output=True, text=True, shell=False,
-                          cwd=str(root) if root else None)
+                          cwd=str(root) if root else None,
+                          encoding='utf-8', errors='replace')
 
 
 def _write(root: Path, rel: str, content: str) -> Path:

@@ -10,10 +10,10 @@ name: wf-triage
 ## 执行
 
 ```bash
-python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/zcode_dev_workflow.py" triage "<任务描述>" --files <预估文件数>
+python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/zcode_dev_workflow.py" triage "<任务描述>" --files <预估文件数>
 ```
 
-随后 `${ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/zcode_dev_workflow.py stages <scale>` 取阶段序列。
+随后 `${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/zcode_dev_workflow.py stages <scale>` 取阶段序列。
 
 ## 必须输出（说出口，不能不说）
 
@@ -43,7 +43,7 @@ python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/zcode_dev_workflow.py" tri
 ## 环境探测（本命令内含）
 
 - `git rev-parse --is-inside-work-tree` → 决定 diff 还是快照证据路径
-- `python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/scripts/openspec_engine.py" list` → 读 `root`；`null` 属正常返回，**不重试、不自动 init**
+- `python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py" list` → 读 `root`；`null` 属正常返回，**不重试、不自动 init**
   - 我自选 OpenSpec 且 root=null → 静默放弃，不提 setup
   - 老板点名/主管道已启动 → 停，三选一：`init` / `--store <id>` / 不用
 

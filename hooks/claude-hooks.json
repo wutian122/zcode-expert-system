@@ -1,0 +1,16 @@
+{
+  "description": "Claude Code adapter — 在每次用户输入前注入专家体系自动触发规则。",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/prepend-global-rules-reminder.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

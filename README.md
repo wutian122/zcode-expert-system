@@ -4,13 +4,20 @@
 
 ## 📋 Overview
 
-**ZCode Expert System** is an expert-routing plugin for ZCode. It ships the full persona prompts of **331 specialists** from [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents), adapted to ZCode with **two-axis routing**: the *scale axis* decides how long a workflow runs, the *domain axis* decides which expert handles it.
+**ZCode Expert System** is an expert-routing plugin that runs on **both ZCode and Claude Code**. It ships the full persona prompts of **331 specialists** from [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents), adapted with **two-axis routing**: the *scale axis* decides how long a workflow runs, the *domain axis* decides which expert handles it.
+
+The same package deploys to either host. ZCode reads `.zcode-plugin/` and `hooks/hooks.json`; Claude Code reads `.claude-plugin/` and `hooks/claude-hooks.json`. The two sides are fully isolated — installing on one never affects the other.
+
+| Host | Manifest | Hooks config | Sub-agent location | Dispatch name |
+|---|---|---|---|---|
+| ZCode | `.zcode-plugin/plugin.json` | `hooks/hooks.json` (`type: process`) | `~/.zcode/agents/` | `后端架构师` (Chinese bare name) |
+| Claude Code | `.claude-plugin/plugin.json` | `hooks/claude-hooks.json` (`type: command`) | `agents/` inside plugin | `zcode-expert-system:后端架构师` (qualified name) |
 
 ## 🏗️ Plugin Architecture
 
 ### System Overview
 
-ZCode Expert System v3.2.1 is an expert-routing plugin for ZCode. It ships the full persona prompts of **331 specialists** from [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents), fused with **Superpowers engineering discipline** and **OpenSpec spec-driven development**. The plugin uses **two-axis orthogonal routing**:
+ZCode Expert System v3.2.2 is an expert-routing plugin for ZCode. It ships the full persona prompts of **331 specialists** from [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents), fused with **Superpowers engineering discipline** and **OpenSpec spec-driven development**. The plugin uses **two-axis orthogonal routing**:
 
 | Axis | Question | Implementation |
 |---|---|---|
@@ -72,7 +79,18 @@ User task
 5. **Dispatch** via `Agent(subagent_type="<specialist display name>")` with a process-contract prefix
 6. **Propagate** context across stages via return values
 
-> **Semantic selection contract**: The plugin deliberately does not configure an external LLM/Embedding service — it depends on the model already active in the session. `scripts/llm_client.py` `_call_llm` and `embedding_client.py` `get_embedding` return `None`, so coarse screening degrades to local token-overlap scoring. When `semantic_selection_required=true`, the controller must review `score_detail` and may override with `build_dispatch_for_expert("<specialist name>", task)`.
+> **Semantic selection contract**: The plugin deliberately does not configure an external LLM/Embedding service — it depends on the model already active in the session. `scripts/llm_client.py` `_call_llm` and `embedding_client.py` `get_embedding` return `None`, so coarse screening degrades to local token-overlap scoring. When `semantic_selection_required=true`, the controller must review `score_detail` and may override with `build_dispatch_for_expert("<specialist name>", task)`. A wrong specialist name raises `ValueError` with the closest matches (difflib suggestion) rather than silently degrading.
+
+**Confidence guard rails** (applied during plan generation):
+
+| Condition | Behaviour |
+|---|---|
+| `confidence ≥ 0.5` | Proceed to semantic review |
+| `confidence < 0.5` **and** `selection_basis: heuristic` | **Implementer dispatch is blocked** (`action: blocked_low_confidence` + `plan.blocking`); clarify the domain with the boss first — token-fallback experts are not dispatched |
+| `confidence < 0.5`, semantic review already done | Dispatch proceeds, but a `semantic_recheck` action is emitted so the controller re-checks `score_detail` |
+| `confidence = 0` | `domain.no_signal = true` — the category is only the `business-support` default, not a real domain judgement |
+
+> **Word-boundary guards**: `返回500` does not fire on `返回5000行数据` (a trailing numeric segment must not be followed by another digit), and zero-width characters (ZWSP / BOM / soft hyphen) are stripped before matching, so they cannot be used to slip past Bug detection.
 
 ### Role × Specialist Matrix (Workflow Roles)
 
@@ -331,12 +349,101 @@ zcode-expert-system install
 (Not yet published — use Option 1 (npm) for now.) Search for `zcode-expert-system`
 in the ZCode plugin marketplace and click install.
 
-### Uninstall
+### Option 4: Claude Code plugin
+
+The same package also works as a Claude Code plugin. Claude Code reads the `.claude-plugin/`
+directory and `hooks/claude-hooks.json` (Claude Code format), while ZCode reads
+`.zcode-plugin/` and `hooks/hooks.json` (ZCode format). The two are fully isolated:
 
 ```bash
-zcode-expert-system uninstall
-# or
-node scripts/install.js --uninstall
+# 1. One-click install (recommended)
+npm install -g zcode-expert-system
+zcode-expert-system cc:install
+
+# 2. Or from a cloned repo
+npm install
+npm run cc:install
+```
+
+**What the one-click installer does** (it wraps four CLI steps so you don't have to run them
+manually):
+
+1. Builds a local marketplace at `~/.claude/plugins/marketplaces/zcode-local/`
+   (`marketplace.json` + the full plugin tree, including a `skills/zcode-expert-system/`
+   mirror so `/wf:*` command script paths resolve)
+2. Registers the marketplace (`claude plugin marketplace add`)
+3. Installs and enables the plugin (`claude plugin install`)
+4. Verifies both `installed_plugins.json` and `enabledPlugins` are updated
+
+After install:
+
+- In Claude Code, run `/plugin` — `zcode-expert-system` should appear
+- Dispatch sub-agents with the qualified name: `zcode-expert-system:<专家中文名>`
+  (e.g. `zcode-expert-system:后端架构师`)
+- Use `/wf:*` commands for the nine-stage workflow
+
+**P5 install safety contract** (`scripts/install-claude-code.js`): the installer is
+*check → back up → build → roll back on failure*:
+
+1. **Preflight** — `preflightCheck()` verifies every required source component
+   (`SKILL.md`, `config/`, `agents/`, `commands/`, `.claude-plugin/`, `hooks/`,
+   `scripts/`) exists **before** anything is deleted; a missing component aborts
+   with `[preflight] 源树缺少部署必需组件`.
+2. **Back up before delete** — an existing marketplace directory is first copied to
+   `.bak-marketplace-<timestamp>` next to it.
+3. **Rollback on failure** — if the build fails, the half-built directory is removed
+   and the backup is restored; if rollback itself fails, the backup path is printed
+   for manual recovery.
+
+**Unpacked component**: `src/` is declared in `UNPACKED_COMPONENTS` and is **not**
+shipped with the plugin. It holds the in-progress `openspec/changes/jwt-auth-system`
+module (`src/auth/`), which has no production consumer yet.
+
+**Other commands:**
+
+```bash
+npm run cc:install:dry     # Preview, touches nothing
+npm run cc:install -- --force   # Force reinstall
+npm run cc:uninstall        # Uninstall (removes registration + marketplace dir)
+```
+
+> **ZCode compatibility is unaffected.** The ZCode deployment paths and behavior
+> remain exactly as before. The Claude Code adapter is fully additive and does not
+> modify any ZCode-facing files.
+
+### Uninstall
+
+Uninstall is unified through `install.js`, with `--zcode` / `--claude-code` flags to choose which side to remove:
+
+```bash
+node scripts/install.js --uninstall                 # Uninstall ZCode + Claude Code (both)
+node scripts/install.js --uninstall --zcode         # Uninstall ZCode only
+node scripts/install.js --uninstall --claude-code   # Uninstall Claude Code only
+node scripts/install.js --uninstall --zcode --purge  # Uninstall ZCode and wipe all residue (incl. runtime data)
+```
+
+Or via npm:
+
+```bash
+npm run uninstall         # both
+npm run uninstall:zcode   # ZCode only
+npm run uninstall:claude  # Claude Code only
+```
+
+**What ZCode-side removal does**: removes the plugin registration, cache, skill,
+commands, sub-agents, and deployment manifests, and cleans up backup
+directories (`skills/*.bak-*`) plus any now-empty command/`expert-system`
+folders. **User runtime data** under `~/.zcode/expert-system/context/` is
+kept by default — add `--purge` to wipe it too.
+
+**What Claude Code-side removal does**: removes the plugin registration and
+`enabledPlugins` entry, removes the marketplace registration, and deletes the
+local marketplace directory. ZCode is not touched.
+
+Prefer a dry run first to preview the full removal plan (zero writes):
+
+```bash
+node scripts/install.js --uninstall --dry-run
 ```
 
 ## ⚙️ Configuration
@@ -451,15 +558,21 @@ session start; additions or edits made mid-session are not picked up.
 ```
 zcode-expert-system/
 ├── .zcode-plugin/plugin.json           # Plugin manifest
+├── .claude-plugin/plugin.json          # Claude Code manifest
 ├── SKILL.md                            # ZCode skill entry
 ├── README.md / README_CN.md            # English / Chinese docs
 ├── zcode_expert_system.py              # Domain axis (32 categories → 331 experts)
 ├── zcode_dev_workflow.py               # Scale axis (triage → stages → dispatch plan)
 ├── skill_entry.py                      # Skill invocation wrapper
 ├── package.json                        # npm package config
+├── src/
+│   └── auth/                           # jwt-auth-system (openspec, in progress; not shipped — UNPACKED_COMPONENTS)
 ├── scripts/
-│   ├── install.js                      # One-click deploy / uninstall
+│   ├── install.js                      # ZCode deploy / uninstall
+│   ├── install-claude-code.js          # Claude Code deploy (preflight + backup + rollback)
+│   ├── cc-uninstall.js                 # Claude Code uninstall
 │   ├── workflow_check.py               # Mechanical gate checker (+ --self-check)
+│   ├── openspec_engine.py              # OpenSpec change/spec engine
 │   ├── llm_client.py                   # LLM call helper
 │   └── embedding_client.py             # Embedding client
 ├── config/
@@ -480,9 +593,10 @@ zcode-expert-system/
 │   └── workflow-fusion-design.md       # Design baseline (why this architecture)
 ├── context/
 │   └── context-manager.py              # Context manager (data in ~/.zcode/expert-system/context/)
-├── tests/                              # Regression tests (pytest)
+├── tests/                              # Regression tests (pytest, 639 passed / 1 skipped)
 ├── hooks/
 │   ├── hooks.json                      # Hook config (ZCode standard schema)
+│   ├── claude-hooks.json               # Hook config (Claude Code format)
 │   └── prepend-global-rules-reminder.mjs  # Injects trigger rules before each prompt
 └── agents/
     ├── manager-*.md                    # 32 domain manager definitions
@@ -518,6 +632,17 @@ Before opening the PR, make sure the full regression suite is green:
 python -m pytest tests/ -q   # must end with "passed", 0 failed
 ```
 
+Expected baseline: **639 passed, 1 skipped**.
+
+> Note on `src/auth/`: the JWT auth module (`jwt-auth-system` OpenSpec change) is under
+> construction and covered by `tests/test_auth_login.py`. Its implementation choices are
+> deliberate: password hashing is **PBKDF2-HMAC-SHA256, 100 000 iterations**, 16-byte
+> random salt, stored base64(`salt||dk`) (bcrypt is a documented fallback, not a
+> dependency); refresh tokens are **`secrets.token_urlsafe(32)`** (256-bit entropy) and
+> only their **sha256 hash** is persisted; `expires_at` is stored and parsed as an
+> **ISO 8601 string** via `datetime.fromisoformat`; JWT verification parses the header
+> and whitelists **`alg=HS256` and `typ=JWT`** before checking the signature.
+
 ## 📄 License
 
 Released under the [MIT License](LICENSE).
@@ -546,4 +671,4 @@ Questions or suggestions? Open a GitHub Issue.
 
 ---
 
-**ZCode Expert System v3.2.1** — smarter collaboration between AI experts 🚀
+**ZCode Expert System v3.2.2** — smarter collaboration between AI experts 🚀

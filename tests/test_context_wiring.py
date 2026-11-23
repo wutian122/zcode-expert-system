@@ -190,3 +190,34 @@ def test_one_shot_without_task_id_has_empty_context(tmp_path, monkeypatch):
     assert er.get("context_summary") == "", "一次性路由不应注入历史摘要"
     assert "【前序上下文】" not in (er.get("dispatch") or {}).get("prompt", ""), (
         "空摘要仍被拼进 prompt（防空段注入头）")
+
+
+# ---------------------------------------------------------------------------
+# N-06：不传 task_id 时默认生成值必须同秒不碰撞（微秒级）
+# ---------------------------------------------------------------------------
+
+def test_default_task_id_unique_within_same_second(tmp_path, monkeypatch):
+    """N-06：同一秒内两次不传 task_id 的 build_context，必须生成不同 task_id。
+
+    秒级精度（%Y%m%d-%H%M%S）下同秒两次调用生成相同 task_id，
+    _load_context_summary 按 task_id 回填时第二个任务会读到第一个任务的
+    历史摘要并注入派发单（归属串扰）。改用微秒级（%f）后不再碰撞。
+    """
+    home = tmp_path / "home3"
+    home.mkdir()
+    for k, v in (("USERPROFILE", str(home)), ("HOME", str(home))):
+        monkeypatch.setenv(k, v)
+
+    from zcode_expert_system import build_context
+    # 连续两次调用（同一秒内），不传 task_id
+    c1 = build_context(None, "frontend-client", None, [], None, None, None,
+                       persist=False)
+    c2 = build_context(None, "frontend-client", None, [], None, None, None,
+                       persist=False)
+    assert c1["task_id"] != c2["task_id"], (
+        "同秒两次调用生成相同 task_id（%s）——秒级精度未改为微秒级"
+        % c1["task_id"])
+    # 格式核验：必须以 %Y%m%d-%H%M%S%f 形态出现（微秒 6 位）
+    import re
+    assert re.match(r"^task-\d{8}-\d{6}\d{6}$", c1["task_id"]), (
+        "task_id 格式不是微秒级：%s" % c1["task_id"])
