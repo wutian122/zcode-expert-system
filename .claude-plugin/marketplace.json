@@ -1,0 +1,15 @@
+{
+  "name": "wutian122-expert-system",
+  "owner": {
+    "name": "wutian122"
+  },
+  "plugins": [
+    {
+      "name": "zcode-expert-system",
+      "source": "./",
+      "description": "ZCode Expert System v3.2 - 331 experts in 32 top-level categories with two-axis routing (scale -> nine-stage workflow, domain -> expert). Fuses OpenSpec + Superpowers + multi-agent + TDD.",
+      "version": "3.2.1",
+      "icon": "https://cdn.jsdelivr.net/gh/wutian122/zcode-expert-system@main/icon.png"
+    }
+  ]
+}
