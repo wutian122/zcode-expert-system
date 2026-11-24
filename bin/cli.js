@@ -15,14 +15,17 @@ const HELP = `
 ZCode 专家体系 - CLI 工具
 
 用法:
-  zcode-expert-system install      安装插件到 ZCode
-  zcode-expert-system uninstall    从 ZCode 卸载插件
-  zcode-expert-system version      显示版本信息
-  zcode-expert-system help         显示本帮助
+  zcode-expert-system install       安装插件到 ZCode
+  zcode-expert-system uninstall     从 ZCode 卸载插件
+  zcode-expert-system cc-install    安装插件到 Claude Code
+  zcode-expert-system cc-uninstall  从 Claude Code 卸载插件
+  zcode-expert-system version       显示版本信息
+  zcode-expert-system help          显示本帮助
 
 示例:
   zcode-expert-system install
-  zcode-expert-system uninstall
+  zcode-expert-system cc-install
+  zcode-expert-system cc-uninstall
 `;
 
 function runInstaller(uninstall) {
@@ -46,6 +49,20 @@ switch (command) {
   case 'uninstall':
     console.log('卸载 ZCode 专家体系插件...');
     runInstaller(true);
+    break;
+
+  // cc-install / cc-uninstall：Claude Code 侧安装/卸载（全局安装场景，
+  // npm script 不可用——README 方式四的 `zcode-expert-system cc:install`
+  // 之前无对应实现，2026-11-24 补齐）。
+  case 'cc-install':
+    console.log('安装 Claude Code 专家体系插件...');
+    require('../scripts/install-claude-code.js');
+    break;
+
+  case 'cc-uninstall':
+    console.log('卸载 Claude Code 专家体系插件...');
+    process.argv = [process.argv[0], 'install-claude-code.js', '--uninstall', ...process.argv.slice(3)];
+    require('../scripts/install-claude-code.js');
     break;
 
   case 'version': {

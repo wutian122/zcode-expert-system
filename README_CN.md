@@ -278,11 +278,18 @@ zcode-expert-system install
 ```bash
 # 一键安装（推荐）
 npm install -g zcode-expert-system
-zcode-expert-system cc:install
+zcode-expert-system cc-install
 
 # 或从克隆的源码仓库
 npm install
 npm run cc:install
+```
+
+卸载 Claude Code 侧：
+
+```bash
+zcode-expert-system cc-uninstall   # 全局安装
+npm run cc:uninstall               # 源码仓库
 ```
 
 **一键安装脚本封装了四步 CLI 操作**，无需手工执行：

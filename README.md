@@ -358,11 +358,18 @@ directory and `hooks/claude-hooks.json` (Claude Code format), while ZCode reads
 ```bash
 # 1. One-click install (recommended)
 npm install -g zcode-expert-system
-zcode-expert-system cc:install
+zcode-expert-system cc-install
 
 # 2. Or from a cloned repo
 npm install
 npm run cc:install
+```
+
+Uninstall the Claude Code side:
+
+```bash
+zcode-expert-system cc-uninstall   # global install
+npm run cc:uninstall               # from a cloned repo
 ```
 
 **What the one-click installer does** (it wraps four CLI steps so you don't have to run them

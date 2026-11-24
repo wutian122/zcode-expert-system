@@ -56,3 +56,4 @@ openspec/changes/*-test-probe/
 # static analyzer still flags open() with user-derived paths.
 # Re-add manually to GitHub after push if needed.
 context/context-manager.py
+package-lock.json
