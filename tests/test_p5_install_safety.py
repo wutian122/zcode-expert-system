@@ -117,15 +117,15 @@ def sandbox(tmp_path, monkeypatch):
 def make_source(tmp_path, *, drop_agents=False, drop_config=False, drop_icon_manifest=False, extra=None):
     """复制一份可安全修改的源树到 tmp_path/src，返回其路径。
 
-    只复制安装脚本关心的目录，避免整仓拷贝（`agents/` 有 363 个文件）。
-    drop_icon_manifest=True 模拟源树缺 .claude-plugin/marketplace.json
-    （图标注入跳过分支）。
+    只复制安装脚本关心的目录，避免整仓拷贝（`tests/`、`docs/`、`vendor/`
+    等与安装脚本无关的内容不进沙箱）。drop_icon_manifest=True 模拟源树缺
+    .claude-plugin/marketplace.json（图标注入跳过分支）。
 
-    注意：**默认不拷 `.claude-plugin/plugin.json`**——deployClaudeCode 对
-    Claude Code 部署有「agents 必须是 363」的硬校验（S5 固化改造），
-    沙箱源树只有 3 个 agent，一旦 plugin.json 存在就会 exit(1)。
-    既有用例靠「manifest 缺失 → 跳过 Claude Code 部署」分支与沙箱共存；
-    I2 修复后该跳过发生在任何 rmSync 之前（连沙箱也不写）。
+    2026-11-24 更新（v3.2.3）：沙箱**默认也拷 .claude-plugin/plugin.json**
+    并带全量 363 个真实 agent 文件——deployClaudeCode 的 manifest 缺失分支
+    已从「⚠️ 跳过」改为 exit(1)（npm 3.2.2 静默部署事故的修复），沙箱必须
+    走完整的 Claude Code 部署链；且多个用例断言 agent 内容更新/备份逻辑，
+    必须拷贝真实文件（占位 0 字节文件过不了内容断言）。
     """
     src = tmp_path / "src"
     for rel in ("scripts", "config", "hooks", "commands"):
@@ -136,20 +136,20 @@ def make_source(tmp_path, *, drop_agents=False, drop_config=False, drop_icon_man
     (src / ".zcode-plugin").mkdir()
     shutil.copy2(PROJECT_ROOT / ".zcode-plugin" / "plugin.json",
                  src / ".zcode-plugin" / "plugin.json")
-    # I4：图标 marketplace 注入依赖 .claude-plugin/marketplace.json，
-    # 缺失时 injectIconMarketplace 会跳过（函数内有告警分支）。
+    # .claude-plugin：marketplace.json（图标）+ plugin.json（部署清单）。
+    # 两者默认都拷——缺 plugin.json 的部署分支自 v3.2.3 起 exit(1)（npm 3.2.2
+    # 静默部署事故的修复），沙箱必须走完整的 Claude Code 部署链。
+    (src / ".claude-plugin").mkdir(exist_ok=True)
+    shutil.copy2(PROJECT_ROOT / ".claude-plugin" / "plugin.json",
+                 src / ".claude-plugin" / "plugin.json")
     if not drop_icon_manifest:
-        (src / ".claude-plugin").mkdir()
         shutil.copy2(PROJECT_ROOT / ".claude-plugin" / "marketplace.json",
                      src / ".claude-plugin" / "marketplace.json")
-
     if not drop_agents:
-        # 只放 3 个 agent 够验证逻辑，不必拷 363 个
-        (src / "agents").mkdir()
-        for name in ("manager-backend-architecture.md",
-                     "expert-engineering-code-reviewer.md",
-                     "expert-engineering-backend-architect.md"):
-            shutil.copy2(PROJECT_ROOT / "agents" / name, src / "agents" / name)
+        # 拷贝全量真实 agents（4.4M，363 个文件）：
+        # deployClaudeCode 的「agents 必须是 363」硬校验需要真实数量，
+        # 且多个用例断言 agent 内容更新/备份逻辑，占位 0 字节文件过不了。
+        shutil.copytree(PROJECT_ROOT / "agents", src / "agents")
     if drop_config:
         shutil.rmtree(src / "config", ignore_errors=True)
     if extra:
@@ -271,7 +271,10 @@ def test_reinstall_removes_stale_agents(sandbox, tmp_path):
     """
     env, home = sandbox
     src = make_source(tmp_path)
-    assert run_installer(src, env).returncode == 0
+    # 本用例只验 ZCode 侧集合幂等：删源 agent 后源树 agents=362，
+    # 走 Claude Code 部署链会被其「必须是 363」硬校验正确拦截（预期行为），
+    # 故限定 --targets zcode。
+    assert run_installer(src, env, "--targets", "zcode").returncode == 0
 
     agents_dir = zcode(home) / "agents"
     first = {p.name for p in agents_dir.glob("*.md")}
@@ -280,7 +283,7 @@ def test_reinstall_removes_stale_agents(sandbox, tmp_path):
     # 删掉一个源 agent，重装
     victim = "expert-engineering-code-reviewer.md"
     (src / "agents" / victim).unlink()
-    assert run_installer(src, env).returncode == 0
+    assert run_installer(src, env, "--targets", "zcode").returncode == 0
 
     now = {p.name for p in agents_dir.glob("*.md")}
     assert victim not in now, (
@@ -295,9 +298,10 @@ def test_manifest_matches_disk_after_reinstall(sandbox, tmp_path):
     """
     env, home = sandbox
     src = make_source(tmp_path)
-    assert run_installer(src, env).returncode == 0
+    # 同上：只验 ZCode 侧清单-磁盘一致性，限定 --targets zcode
+    assert run_installer(src, env, "--targets", "zcode").returncode == 0
     (src / "agents" / "expert-engineering-code-reviewer.md").unlink()
-    assert run_installer(src, env).returncode == 0
+    assert run_installer(src, env, "--targets", "zcode").returncode == 0
 
     manifest = zcode(home) / "expert-system" / "deployed-agents.json"
     data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -836,16 +840,19 @@ def test_manifest_missing_skips_marketplace_injection(sandbox, tmp_path):
     assert installed_entries(home, PLUGIN_ID) == 1, "功能层注册不受图标层影响"
 
 
-def test_deploy_claude_code_skips_when_manifest_missing(sandbox, tmp_path):
-    """I2：缺 .claude-plugin/plugin.json 时不得先删 Claude Code 缓存再报错。
+def test_deploy_claude_code_fails_when_manifest_missing(sandbox, tmp_path):
+    """I2 + v3.2.3：缺 .claude-plugin/plugin.json 时必须 exit 1 且不碰旧缓存。
 
     修前形态：先 rmSync(claudePluginRoot) 清掉用户已有的插件缓存，
     再检查 manifestSrc 是否存在——manifest 缺失时用户得到
-    「旧的已删、新的没装」。正确顺序：先查 manifest，缺失即 return。
-    （make_source 默认不拷 plugin.json，天然覆盖本场景。）
+    「旧的已删、新的没装」。I2 修复后先查后删；v3.2.3 再进一步把
+    「⚠️ 跳过后照常打印部署完成」的静默成功改为 exit 1（npm 3.2.2
+    全局安装用户「以为装上了、/plugin 里却没有」的事故根因）。
     """
     env, home = sandbox
     src = make_source(tmp_path)
+    # 故意删掉 manifest，模拟 npm 包 files 白名单漏 .claude-plugin/ 的场景
+    (src / ".claude-plugin" / "plugin.json").unlink()
 
     # 预置一个「用户已有的旧版缓存」
     stale = (home / ".claude" / "plugins" / "cache" / "claude-plugins-official"
@@ -854,7 +861,10 @@ def test_deploy_claude_code_skips_when_manifest_missing(sandbox, tmp_path):
     (stale / "stale-marker.txt").write_text("用户的旧版缓存\n", encoding="utf-8")
 
     proc = run_installer(src, env, "--targets", "claude-code")
-    assert proc.returncode == 0, "跳过 Claude Code 部署应成功返回：%s" % (proc.stderr or proc.stdout)[-500:]
+    # v3.2.3：源树完整性问题必须失败退出，不得静默成功
+    assert proc.returncode == 1, "manifest 缺失时必须 exit 1：%s" % (proc.stderr or proc.stdout)[-500:]
     assert (stale / "stale-marker.txt").is_file(), (
         "manifest 缺失时 Claude Code 旧缓存被先删（先删后验未修复）")
-    assert "跳过 Claude Code 部署" in (proc.stdout + proc.stderr), "未打印跳过原因"
+    assert "部署失败" in (proc.stdout + proc.stderr), "未打印失败原因"
+    assert "部署完成" not in (proc.stdout + proc.stderr), (
+        "manifest 缺失仍打印「部署完成」——静默成功误导用户（npm 3.2.2 事故）")

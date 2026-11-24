@@ -1,4 +1,4 @@
-# ZCode Expert System v3.2.2 - ZCode 专家体系
+# ZCode Expert System v3.2.3 - ZCode 专家体系
 
 [English](README.md) · **简体中文**
 
@@ -17,7 +17,7 @@
 
 ### 系统概述
 
-ZCode Expert System v3.2.2 是 ZCode 的专家路由插件。它承载来自 [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents) 的 331 位专家完整人格提示词，并融合 **Superpowers 工程能力体系** 与 **OpenSpec 规格驱动开发体系**。插件采用**两轴正交路由**：
+ZCode Expert System v3.2.3 是 ZCode 的专家路由插件。它承载来自 [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents) 的 331 位专家完整人格提示词，并融合 **Superpowers 工程能力体系** 与 **OpenSpec 规格驱动开发体系**。插件采用**两轴正交路由**：
 
 | 轴 | 回答问题 | 实现 |
 |---|---|---|
@@ -584,4 +584,4 @@ python -m pytest tests/ -q   # 末行必须是 "passed"，0 failed
 
 ---
 
-**ZCode Expert System v3.2.2** - 让 AI 专家协作更智能 🚀
+**ZCode Expert System v3.2.3** - 让 AI 专家协作更智能 🚀

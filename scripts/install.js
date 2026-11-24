@@ -369,6 +369,9 @@ function writeJsonWithBackup(file, data) {
 function injectIconMarketplace(zcodeDir) {
   const manifestSrc = path.join(PROJECT_ROOT, '.claude-plugin', 'marketplace.json');
   if (!fs.existsSync(manifestSrc)) {
+    // 注意：这里**故意**保持告警+return——图标注入是装饰层（损失只是图标
+    // 不显示），而 deployClaudeCode 的 manifest 缺失是部署链断裂，必须 exit 1。
+    // 两者语义不同，勿统一。test_p12 只守 deployClaudeCode 那一处。
     log(`⚠️  缺 ${manifestSrc}，跳过图标 marketplace 注入（图标将不显示）`);
     return;
   }
@@ -663,10 +666,16 @@ function deployClaudeCode(homeDir, version) {
   // I2（2026-11-23）：先校验、后动手——manifestSrc 缺失时直接返回，
   // 不得先 rmSync 用户已有的 Claude Code 插件缓存（旧实现先删后验，
   // manifest 缺失时用户得到「旧的已删、新的没装」）。
+  // 2026-11-24 修正：缺失属源树完整性问题（npm 包 files 白名单漏了
+  // .claude-plugin/ 导致），必须**报错退出 rc=1**，不得静默跳过后还
+  // 打印「部署完成」误导用户——npm 3.2.2 的「装上了但 /plugin 没有」
+  // 事故即由此出。
   const manifestSrc = path.join(PROJECT_ROOT, '.claude-plugin', 'plugin.json');
   if (!fs.existsSync(manifestSrc)) {
-    log('⚠️  跳过 Claude Code 部署：.claude-plugin/plugin.json 不存在');
-    return;
+    log('❌ Claude Code 部署失败：源树缺少 .claude-plugin/plugin.json');
+    log('   这是源树完整性问题（npm 包 files 白名单应含 .claude-plugin/）。');
+    log('   ZCode 侧已部署；Claude Code 侧未部署，请修复源树后重装。');
+    process.exit(1);
   }
 
   if (!DRY_RUN) {

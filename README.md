@@ -17,7 +17,7 @@ The same package deploys to either host. ZCode reads `.zcode-plugin/` and `hooks
 
 ### System Overview
 
-ZCode Expert System v3.2.2 is an expert-routing plugin for ZCode. It ships the full persona prompts of **331 specialists** from [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents), fused with **Superpowers engineering discipline** and **OpenSpec spec-driven development**. The plugin uses **two-axis orthogonal routing**:
+ZCode Expert System v3.2.3 is an expert-routing plugin for ZCode. It ships the full persona prompts of **331 specialists** from [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents), fused with **Superpowers engineering discipline** and **OpenSpec spec-driven development**. The plugin uses **two-axis orthogonal routing**:
 
 | Axis | Question | Implementation |
 |---|---|---|
@@ -678,4 +678,4 @@ Questions or suggestions? Open a GitHub Issue.
 
 ---
 
-**ZCode Expert System v3.2.2** — smarter collaboration between AI experts 🚀
+**ZCode Expert System v3.2.3** — smarter collaboration between AI experts 🚀
