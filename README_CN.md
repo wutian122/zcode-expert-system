@@ -1,4 +1,4 @@
-# ZCode Expert System v3.2.3 - ZCode 专家体系
+# ZCode Expert System v3.2.4 - ZCode 专家体系
 
 [English](README.md) · **简体中文**
 
@@ -17,7 +17,7 @@
 
 ### 系统概述
 
-ZCode Expert System v3.2.3 是 ZCode 的专家路由插件。它承载来自 [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents) 的 331 位专家完整人格提示词，并融合 **Superpowers 工程能力体系** 与 **OpenSpec 规格驱动开发体系**。插件采用**两轴正交路由**：
+ZCode Expert System v3.2.4 是 ZCode 的专家路由插件。它承载来自 [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents) 的 331 位专家完整人格提示词，并融合 **Superpowers 工程能力体系** 与 **OpenSpec 规格驱动开发体系**。插件采用**两轴正交路由**：
 
 | 轴 | 回答问题 | 实现 |
 |---|---|---|
@@ -311,8 +311,13 @@ npm run cc:uninstall               # 源码仓库
 1. **源树预检** —— `preflightCheck()` 在**删除任何东西之前**校验每个必需源组件
    （`SKILL.md`、`config/`、`agents/`、`commands/`、`.claude-plugin/`、`hooks/`、`scripts/`）
    均存在；缺任一组件即中止，报 `[preflight] 源树缺少部署必需组件`。
+   v3.2.4 起额外校验 `.claude-plugin/plugin.json` **不得含 `agents` 字段**——本机
+   Claude Code 的 manifest schema 要求该字段必须是单个 `.md` 文件路径，目录声明会令
+   整个插件加载失败；363 个子代理靠 Claude Code 对 `agents/` 目录的约定式扫描注册。
 2. **删前备份** —— 已存在的市场目录先复制为同级的 `.bak-marketplace-<时间戳>`。
 3. **失败回滚** —— 构建失败时移除半成品目录并还原备份；若回滚本身也失败，打印备份路径供手工恢复。
+4. **验证 agents 部署** —— `verify()` 检查市场目录 `agents/` 的 `.md` 数量与 manifest
+   无 `agents` 字段，两项均符合才打印通过。
 
 **未打包组件**：`src/` 声明在 `UNPACKED_COMPONENTS` 中，**不随插件分发**。它承载在建中的
 `openspec/changes/jwt-auth-system` 模块（`src/auth/`），目前尚无生产消费者。
@@ -584,4 +589,4 @@ python -m pytest tests/ -q   # 末行必须是 "passed"，0 failed
 
 ---
 
-**ZCode Expert System v3.2.3** - 让 AI 专家协作更智能 🚀
+**ZCode Expert System v3.2.4** - 让 AI 专家协作更智能 🚀
