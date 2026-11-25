@@ -17,7 +17,7 @@ The same package deploys to either host. ZCode reads `.zcode-plugin/` and `hooks
 
 ### System Overview
 
-ZCode Expert System v3.2.3 is an expert-routing plugin for ZCode. It ships the full persona prompts of **331 specialists** from [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents), fused with **Superpowers engineering discipline** and **OpenSpec spec-driven development**. The plugin uses **two-axis orthogonal routing**:
+ZCode Expert System v3.2.4 is an expert-routing plugin for ZCode. It ships the full persona prompts of **331 specialists** from [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents), fused with **Superpowers engineering discipline** and **OpenSpec spec-driven development**. The plugin uses **two-axis orthogonal routing**:
 
 | Axis | Question | Implementation |
 |---|---|---|
@@ -395,12 +395,19 @@ After install:
 1. **Preflight** — `preflightCheck()` verifies every required source component
    (`SKILL.md`, `config/`, `agents/`, `commands/`, `.claude-plugin/`, `hooks/`,
    `scripts/`) exists **before** anything is deleted; a missing component aborts
-   with `[preflight] 源树缺少部署必需组件`.
+   with `[preflight] 源树缺少部署必需组件`. Since v3.2.4 it also rejects a
+   `.claude-plugin/plugin.json` that declares an `agents` field — Claude Code's
+   manifest schema requires that field to be a single `.md` file path, and a
+   directory declaration makes the whole plugin fail to load; the 363 subagents
+   register via Claude Code's convention-based scan of the `agents/` directory.
 2. **Back up before delete** — an existing marketplace directory is first copied to
    `.bak-marketplace-<timestamp>` next to it.
 3. **Rollback on failure** — if the build fails, the half-built directory is removed
    and the backup is restored; if rollback itself fails, the backup path is printed
    for manual recovery.
+4. **Verify agents deployment** — `verify()` checks the `.md` count under the
+   deployed `agents/` directory and the absence of the `agents` field in the
+   manifest; both must pass before it prints success.
 
 **Unpacked component**: `src/` is declared in `UNPACKED_COMPONENTS` and is **not**
 shipped with the plugin. It holds the in-progress `openspec/changes/jwt-auth-system`
@@ -678,4 +685,4 @@ Questions or suggestions? Open a GitHub Issue.
 
 ---
 
-**ZCode Expert System v3.2.3** — smarter collaboration between AI experts 🚀
+**ZCode Expert System v3.2.4** — smarter collaboration between AI experts 🚀

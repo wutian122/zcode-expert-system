@@ -152,6 +152,11 @@ const DEPLOY_REQUIRED = [
 /**
  * 源树完整性预检：部署必需组件缺失时抛错中止。
  * 在删除任何现有目录之前执行，落实 P5 契约「先校验、后动手」。
+ *
+ * 同时校验 .claude-plugin/plugin.json 不得含 agents 字段：
+ * 本机 Claude Code 的 manifest schema 规定 agents 必须是**单个 .md 文件**
+ * （"Invalid string: must end with .md"），声明目录会令整个插件加载失败。
+ * 363 个专家靠约定式扫描 agents/ 目录注册，无需该字段。
  */
 function preflightCheck() {
   const missing = DEPLOY_REQUIRED.filter(
@@ -160,6 +165,18 @@ function preflightCheck() {
   if (missing.length > 0) {
     throw new Error(
       `[preflight] 源树缺少部署必需组件，中止：${missing.join(', ')}`
+    );
+  }
+  const manifest = readJson(path.join(PROJECT_ROOT, '.claude-plugin', 'plugin.json'));
+  if (!manifest) {
+    throw new Error('[preflight] .claude-plugin/plugin.json 不可读或不是合法 JSON，中止');
+  }
+  if (manifest.agents) {
+    throw new Error(
+      '[preflight] .claude-plugin/plugin.json 含 "agents" 字段——'
+      + '本机 Claude Code 要求该字段必须是单个 .md 文件路径，目录声明会导致'
+      + '整个插件 manifest 校验失败（插件不可用）。请移除该字段后重试'
+      + '（agents/ 目录由约定式扫描自动注册）。'
     );
   }
 }
@@ -347,6 +364,34 @@ function verify(homeDir) {
     log('⚠️  插件已注册但未启用（enabledPlugins 无条目），请在 /plugin 中手动启用');
   } else {
     log('✅ 验证通过：插件已注册并启用');
+  }
+
+  // 验证 agents 目录是否被正确部署（约定式扫描，plugin.json 不声明 agents 字段）
+  const marketAgentsDir = path.join(
+    homeDir, '.claude', 'plugins', 'marketplaces', MARKETPLACE,
+    PLUGIN_NAME, 'agents'
+  );
+  const agentCount = fs.existsSync(marketAgentsDir)
+    ? fs.readdirSync(marketAgentsDir).filter(f => f.endsWith('.md')).length
+    : 0;
+  if (agentCount === 0) {
+    log('⚠️  市场目录中 agents/ 无 .md 文件——363 个专家无法派发');
+    log('   请检查源树 agents/ 目录是否完整（约定式扫描，无需 manifest 声明）');
+  } else {
+    log(`✅ agents/ 已部署 ${agentCount} 个专家智能体`);
+  }
+
+  // 验证 plugin.json 不含 agents 字段（本机 schema：必须是单个 .md，目录声明会炸整个插件）
+  const manifestPath = path.join(
+    homeDir, '.claude', 'plugins', 'marketplaces', MARKETPLACE,
+    PLUGIN_NAME, '.claude-plugin', 'plugin.json'
+  );
+  const manifest = readJson(manifestPath);
+  if (manifest && !manifest.agents) {
+    log('✅ plugin.json 无 agents 字段（正确——agents/ 走约定式扫描）');
+  } else if (manifest && manifest.agents) {
+    log('❌ plugin.json 含 agents 字段——manifest 校验会失败，整个插件不可用');
+    log('   请移除该字段（agents/ 目录由 Claude Code 约定式扫描自动注册）');
   }
 }
 
