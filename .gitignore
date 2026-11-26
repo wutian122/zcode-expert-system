@@ -15,7 +15,7 @@ npm-debug.log*
 .zcode/
 .zcode-*/**/
 plugins/
-skills/
+/skills/
 
 # Required source artifacts that must be committed
 !.zcode-plugin/
