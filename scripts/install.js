@@ -45,6 +45,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { spawnSync } = require('child_process');
 
 const PLUGIN_NAME = 'zcode-expert-system';
 const SKILL_NAME = 'zcode-expert-system';
@@ -508,11 +509,95 @@ function removeIconMarketplace(zcodeDir) {
 }
 
 /**
+ * 部署副本必须存在的运行时组件（相对技能根）。
+ *
+ * 这些不是「锦上添花」：`scripts/workflow_check.py` 是 `/wf:*` 命令的机械
+ * 核对入口（含 dispatch 派发证据门禁），`config/categories.json` 的 32 类
+ * description 是域路由的语义画像，`templates/` 是账本/派发单/报告模板，
+ * `references/` 是九阶段与角色说明。缺任何一项，部署出来的都是残件。
+ *
+ * 不列 `bin`/`context`：ZCode 技能目录在步骤 1c 主动剔除 `bin`，
+ * `context/` 是运行时数据目录（按宿主隔离，随使用生成）。
+ */
+const RUNTIME_COMPONENTS = [
+  'scripts/workflow_check.py',
+  'config/categories.json',
+  'config/experts.json',
+  'config/workflow.json',
+  'templates',
+  'references',
+  'agents',
+  'commands',
+  'hooks',
+  'SKILL.md',
+  'zcode_dev_workflow.py',
+  'zcode_expert_system.py',
+  'skill_entry.py',
+];
+
+/**
+ * 校验 `<root>/config/categories.json`：必须 32 类且每类 description 可读。
+ * 返回问题列表（空数组即通过），供预检与部署后校验共用。
+ */
+function checkCategoriesProfile(root) {
+  const file = path.join(root, 'config', 'categories.json');
+  if (!fs.existsSync(file)) return [`缺 config/categories.json：${file}`];
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    return [`config/categories.json 不是合法 JSON：${err.message}`];
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return ['config/categories.json 顶层必须是对象（分类名 → 分类定义）'];
+  }
+  const problems = [];
+  const keys = Object.keys(data);
+  if (keys.length !== 32) {
+    problems.push(`config/categories.json 分类数 ${keys.length}（应为 32）`);
+  }
+  const noDesc = keys.filter(
+    (k) => !data[k] || !String(data[k].description || '').trim());
+  if (noDesc.length) {
+    problems.push(
+      `config/categories.json 有 ${noDesc.length} 个分类缺 description`
+      + `（域路由画像会失效）：${noDesc.slice(0, 6).join(', ')}`);
+  }
+  return problems;
+}
+
+/**
+ * 部署后校验：缺运行时组件即报错退出，**不得只告警**。
+ *
+ * 只警告的旧形态让「装上了但 /wf:* 跑不起来」成为静默失败——用户看到的是
+ * 「部署完成」。这里 rc=1，让失败可见、可回滚。
+ */
+function verifyDeployment(root, label) {
+  if (DRY_RUN) return;
+  const problems = RUNTIME_COMPONENTS
+    .filter((rel) => !fs.existsSync(path.join(root, rel)))
+    .map((rel) => `缺 ${rel}`);
+  problems.push(...checkCategoriesProfile(root));
+  if (problems.length) {
+    log(`❌ ${label}部署校验失败：${root}`);
+    for (const p of problems) log(`   · ${p}`);
+    log('   部署不完整：/wf:* 命令、类目画像、模板或参考文档会落空。请修复源树后重装。');
+    process.exit(1);
+  }
+  done(`✅ ${label}部署校验通过：workflow_check / categories(32 类) / templates / references 均在位`);
+}
+
+/**
  * 预检：在**任何** rmSync 之前确认源树完整。
  *
  * 缺陷 #17 的根因就是这一步缺失——旧实现先删再说，缺文件时才抛错，
  * 用户得到「旧的已删、新的没装」且无回滚。这里把所有前置条件集中检查，
  * 任一不满足即抛错，此时磁盘零改动。
+ *
+ * v3.2.5 扩展：运行时组件（`scripts/workflow_check.py`、`config/categories.json`、
+ * `templates/`、`references/`）也在预检内核对。此前只查 agents 数量，
+ * 这些文件缺失时安装器仍打印「部署完成」——用户拿到的是 `/wf:*` 命令
+ * 与类目画像都跑不起来的插件。
  */
 function preflight() {
   const problems = [];
@@ -529,6 +614,17 @@ function preflight() {
     const p = path.join(PROJECT_ROOT, rel);
     if (!fs.existsSync(p)) problems.push(`缺 ${rel}：${p}`);
   }
+
+  // v3.2.5：部署后必须存在的运行时组件，源树缺一个就不得开始删除。
+  for (const rel of [
+    'templates', 'references', 'hooks',
+    'scripts/workflow_check.py',
+    'zcode_dev_workflow.py', 'zcode_expert_system.py', 'skill_entry.py',
+  ]) {
+    const p = path.join(PROJECT_ROOT, rel);
+    if (!fs.existsSync(p)) problems.push(`缺 ${rel}：${p}`);
+  }
+  problems.push(...checkCategoriesProfile(PROJECT_ROOT));
 
   for (const rel of [
     'scripts/sdd/sdd-workspace',
@@ -605,10 +701,31 @@ const PLUGIN_OUTPUTS = new Set([
   'zcode_expert_system.py', 'zcode_dev_workflow.py', 'skill_entry.py',
   'config', 'agents', 'references', 'templates', 'commands', 'context',
   'docs', 'hooks', 'scripts', 'bin', '.zcode-plugin',
+  // copyDir(PROJECT_ROOT, skillDest) 会把源树根的这些条目一并带进部署目录
+  // （见步骤 1c 的剔除清单：只剔 package.json / .zcode-plugin / bin）。
+  // 它们不是用户内容——漏登记会让每个备份都被判 hasUserFiles=true，
+  // 「空备份自动清理」永久失效（C1 复审实测：`.claude-plugin` 即是此例）。
+  '.claude-plugin', '.claude', '.gitignore', 'icon.png', '.zcode',
   // 'tests' 已移除（P8 批次三 Task 8）：源树从不部署 tests/，把它算进
   // 「插件产物」会让用户自建的 tests/ 在备份时被判 hasUserFiles=false
   // 而连备份一起删——数据销毁方向。
 ]);
+
+/**
+ * 备份目录里是否含「本插件不会产出」的文件（用户自建内容）。
+ *
+ * 安装侧（backupDir）与卸载侧（步骤 5a 的备份清理）共用同一判定：
+ * 两处口径必须一字不差，否则会出现「安装时判定有用户文件而保留、
+ * 卸载时却按另一套规则当垃圾删掉」的数据销毁路径。
+ * 读不到目录时返回 true——宁可不删。
+ */
+function hasUserFiles(dir) {
+  try {
+    return fs.readdirSync(dir).some((name) => !PLUGIN_OUTPUTS.has(name));
+  } catch {
+    return true;
+  }
+}
 
 function backupDir(target) {
   if (!fs.existsSync(target)) return null;
@@ -616,13 +733,7 @@ function backupDir(target) {
   act(`备份 ${target} → ${bak}`, () => fs.renameSync(target, bak));
   if (DRY_RUN) return { path: null, hasUserFiles: false };
 
-  let hasUserFiles = false;
-  try {
-    hasUserFiles = fs.readdirSync(bak).some((name) => !PLUGIN_OUTPUTS.has(name));
-  } catch {
-    hasUserFiles = true;          // 读不到就当有，宁可不删
-  }
-  return { path: bak, hasUserFiles };
+  return { path: bak, hasUserFiles: hasUserFiles(bak) };
 }
 
 function writeAgentFile(dest, rendered) {
@@ -650,18 +761,33 @@ function writeAgentFile(dest, rendered) {
   fs.writeFileSync(dest, rendered, 'utf8');
 }
 
+/** Claude Code CLI 是否可用（Windows 下经 cmd.exe 解析 .cmd shim）。 */
+function claudeCliAvailable() {
+  const res = process.platform === 'win32'
+    ? spawnSync('cmd.exe', ['/c', 'claude', '--version'], { stdio: 'ignore' })
+    : spawnSync('claude', ['--version'], { stdio: 'ignore' });
+  return res.status === 0;
+}
+
 /**
- * 部署 Claude Code 插件副本。
+ * 部署 Claude Code 插件。
  *
- * 部署目标：~/.claude/plugins/cache/claude-plugins-official/zcode-expert-system/<version>/
+ * 正常路径：委托 install-claude-code.js，构建本地 marketplace → 官方 CLI
+ * 注册并安装 → 验证。**只复制文件不注册，Claude Code 的 /plugin 看不到插件**
+ * （v3.2.2 事故根因）。
  *
- * 与 ZCode 部署的核心差异：**必须包含 agents/**。Claude Code 只从插件目录内
- * 加载子代理；ZCode 则是从全局 ~/.zcode/agents/ 加载（见 install.js 步骤 3）。
+ * 降级路径：未检测到 Claude CLI 或显式 ZES_CLAUDE_INSTALL=legacy 时，仅复制
+ * 到旧缓存目录并明确告警——文件在磁盘上，但不会被 /plugin 加载。
  */
 function deployClaudeCode(homeDir, version) {
   const claudePluginRoot = path.join(
     homeDir, '.claude', 'plugins', 'cache', 'claude-plugins-official', PLUGIN_NAME, version
   );
+
+  if (DRY_RUN) {
+    log('  [dry-run] 将构建本地 marketplace（zcode-local）并通过 claude CLI 注册安装');
+    return;
+  }
 
   // I2（2026-11-23）：先校验、后动手——manifestSrc 缺失时直接返回，
   // 不得先 rmSync 用户已有的 Claude Code 插件缓存（旧实现先删后验，
@@ -678,17 +804,36 @@ function deployClaudeCode(homeDir, version) {
     process.exit(1);
   }
 
-  if (!DRY_RUN) {
-    if (fs.existsSync(claudePluginRoot)) {
-      fs.rmSync(claudePluginRoot, { recursive: true, force: true });
+  const mode = process.env.ZES_CLAUDE_INSTALL || 'marketplace';
+  if (mode !== 'legacy' && claudeCliAvailable()) {
+    log('开始注册 Claude Code 插件（本地 marketplace）...');
+    const args = [
+      path.join(__dirname, 'install-claude-code.js'),
+      '--targets', 'claude-code', '--force',
+    ];
+    const res = spawnSync(process.execPath, args, {
+      stdio: 'inherit',
+      cwd: PROJECT_ROOT,
+      env: process.env,
+    });
+    if (res.status !== 0) {
+      log('❌ Claude Code 插件注册失败');
+      log('   文件可能已构建，但未出现在 /plugin 中；请检查上方错误后重试。');
+      process.exit(1);
     }
-    fs.mkdirSync(claudePluginRoot, { recursive: true });
-  }
-
-  if (DRY_RUN) {
-    log(`  [dry-run] 将部署 Claude Code 插件到: ${claudePluginRoot}`);
     return;
   }
+
+  if (mode !== 'legacy') {
+    log('⚠️  未检测到 Claude Code CLI（claude）：无法注册插件。');
+    log('   将仅复制文件到旧缓存目录——/plugin 不会加载它。');
+    log('   安装 Claude Code CLI 后请重新运行 zcode-expert-system install。');
+  }
+
+  if (fs.existsSync(claudePluginRoot)) {
+    fs.rmSync(claudePluginRoot, { recursive: true, force: true });
+  }
+  fs.mkdirSync(claudePluginRoot, { recursive: true });
 
   // 1. 插件清单
   const manifestDest = path.join(claudePluginRoot, '.claude-plugin', 'plugin.json');
@@ -728,7 +873,7 @@ function deployClaudeCode(homeDir, version) {
   }
 
   // 6. 运行时依赖
-  for (const dir of ['scripts', 'config', 'references', 'templates', 'bin']) {
+  for (const dir of ['scripts', 'config', 'references', 'templates', 'bin', 'context']) {
     const src = path.join(PROJECT_ROOT, dir);
     if (fs.existsSync(src)) {
       copyDir(src, path.join(claudePluginRoot, dir));
@@ -739,7 +884,7 @@ function deployClaudeCode(homeDir, version) {
   //    zcode_expert_system.py 是命令直接引用的路由/分诊引擎，
   //    skill_entry.py 是技能入口。它们不在任何子目录里，
   //    ZCode 侧靠 skills/<name>/ 整树复制带上，Claude Code 侧须显式复制。
-  for (const f of ['zcode_dev_workflow.py', 'zcode_expert_system.py', 'skill_entry.py']) {
+  for (const f of ['SKILL.md', 'zcode_dev_workflow.py', 'zcode_expert_system.py', 'skill_entry.py']) {
     const src = path.join(PROJECT_ROOT, f);
     if (fs.existsSync(src)) {
       fs.copyFileSync(src, path.join(claudePluginRoot, f));
@@ -797,6 +942,16 @@ function detectTargets(homeDir) {
       hint: '~/.claude',
       detected: fs.existsSync(path.join(homeDir, '.claude')),
     },
+    {
+      id: 'qoder',
+      label: 'Qoder',
+      hint: '~/.qoder',
+      detected: fs.existsSync(path.join(homeDir, '.qoder'))
+        || fs.existsSync(path.join(homeDir, '.qoder-cn')),
+      // 非交互终端（CI/管道）保持历史行为：只装 ZCode + Claude Code。
+      // Qoder 必须在交互菜单中显式勾选，或用 --targets qoder 指定。
+      defaultChecked: false,
+    },
   ];
 }
 
@@ -804,16 +959,28 @@ function detectTargets(homeDir) {
  * 交互式多选菜单（零依赖，手写 readline 按键处理）。
  *
  * 操作：↑/↓ 移动，Space 切换，Enter 确认，Ctrl+C 取消。
- * 非 TTY 环境（CI、管道、重定向）直接返回全选，绝不卡住。
+ * 非 TTY 环境（CI、管道、重定向）返回 opts 指定默认值，绝不卡住。
  */
-function selectTargets(options) {
+function selectTargets(options, opts = {}) {
+  const action = opts.action || '安装到';
+  const noun = opts.noun || '安装目标';
+  const nonInteractiveDefault = opts.nonInteractiveDefault
+    || options.filter((o) => o.defaultChecked !== false).map((o) => o.id);
+  const nonInteractiveText = opts.nonInteractiveText || 'ZCode + Claude Code';
+
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    log('（非交互终端，默认全选）');
-    return options.map((o) => o.id);
+    log(`（非交互终端，默认选择 ${nonInteractiveText}）`);
+    return Promise.resolve(nonInteractiveDefault);
   }
 
   return new Promise((resolve) => {
-    const checked = options.map((o) => o.detected); // 检测到的默认勾选
+    // 安装时 Qoder 的 defaultChecked:false 要求显式选择；
+    // 卸载时 opts.precheckAllDetected=true 让已检测到的目标默认勾选。
+    const checked = options.map((o) => (
+      opts.precheckAllDetected
+        ? o.detected
+        : (o.defaultChecked !== false && o.detected)
+    ));
     let cursor = 0;
     let rendered = false;
 
@@ -828,7 +995,7 @@ function selectTargets(options) {
       }
       const selectedCount = checked.filter(Boolean).length;
       process.stdout.write(
-        `? 选择要安装到哪些工具（共 ${options.length} 个，已选 ${selectedCount}）\n`
+        `? 选择要${action}哪些工具（共 ${options.length} 个，已选 ${selectedCount}）\n`
       );
       options.forEach((o, i) => {
         const box = checked[i] ? '\x1b[36m◉\x1b[0m' : '\x1b[90m◯\x1b[0m';
@@ -865,7 +1032,7 @@ function selectTargets(options) {
         cleanup();
         const chosen = options.filter((_, i) => checked[i]).map((o) => o.id);
         if (chosen.length === 0) {
-          log('❌ 至少需要选择一个安装目标。');
+          log(`❌ 至少需要选择一个${noun}。`);
           process.exit(1);
         }
         render(false);
@@ -891,14 +1058,36 @@ function selectTargets(options) {
 }
 
 /**
+ * 部署 Qoder 用户级组件（独立脚本，避免与 ZCode/Claude 分支互相影响）。
+ * 必须继承 process.env，让 QODER_HOME 在 Qoder Desktop 会话中生效。
+ */
+function deployQoder() {
+  const args = [path.join(__dirname, 'install-qoder.js')];
+  if (DRY_RUN) args.push('--dry-run');
+  log('开始部署 Qoder 侧（用户级 Skill / Commands / Agents / Hook）...');
+  const res = spawnSync(process.execPath, args, {
+    stdio: 'inherit',
+    cwd: PROJECT_ROOT,
+    env: process.env,
+  });
+  if (res.status !== 0) {
+    // Qoder 是新增目标，失败不得阻断同批次 ZCode/Claude 部署。
+    log('❌ Qoder 部署失败（继续部署其他已选目标）');
+    return false;
+  }
+  return true;
+}
+
+/**
  * 部署插件。
  *
- * @param {string[]} targets 要部署的目标，取值 'zcode' / 'claude-code'。
+ * @param {string[]} targets 要部署的目标，取值 'zcode' / 'claude-code' / 'qoder'。
  *                           为空数组时表示「只跑预检与提示，不部署」。
  */
 function install(targets = ['zcode', 'claude-code']) {
   const wantZcode = targets.includes('zcode');
   const wantClaude = targets.includes('claude-code');
+  const wantQoder = targets.includes('qoder');
   const homeDir = os.homedir();
   const zcodeDir = path.join(homeDir, '.zcode');
 
@@ -912,23 +1101,36 @@ function install(targets = ['zcode', 'claude-code']) {
   log(`部署目标: ${targets.join(' + ') || '（无）'}`);
 
   // ---------- 0a. Claude Code 部署（独立于 ZCode，不影响 ZCode 行为） ----------
-  // 部署目标：~/.claude/plugins/cache/claude-plugins-official/zcode-expert-system/<version>/
-  // 必须包含 agents/（Claude Code 从插件目录加载子代理，ZCode 从全局 ~/.zcode/agents/ 加载）
+  // 走本地 marketplace + 官方 CLI 注册，/plugin 才能看到插件；
+  // 仅复制到旧缓存目录是无效部署（v3.2.2 事故根因）。
   if (wantClaude) {
     deployClaudeCode(homeDir, version);
   } else {
     log('⏭️  跳过 Claude Code 部署（未选择）');
   }
 
+  // ---------- 0b. Qoder 部署（独立用户级目录，不影响 ZCode/Claude） ----------
+  let qoderFailed = false;
+  if (wantQoder) {
+    qoderFailed = !deployQoder();
+  } else {
+    log('⏭️  跳过 Qoder 部署（未选择）');
+  }
+
   if (!wantZcode) {
     log('');
-    log('🎉 部署完成！');
+    log(qoderFailed ? '⚠️  部署完成，但 Qoder 失败' : '🎉 部署完成！');
     log('');
     log('验证方式：');
     if (wantClaude) {
-      log('  1. 在 Claude Code 中执行 /plugin，应出现 zcode-expert-system');
-      log('  2. 派发专家时使用 zcode-expert-system:<专家中文名>');
+      log('  Claude Code: 执行 /plugin，应出现 zcode-expert-system');
+      log('  派发专家：zcode-expert-system:<专家中文名>');
     }
+    if (wantQoder && !qoderFailed) {
+      log('  Qoder: 重启或新建任务，输入 /wf:triage 验证命令');
+      log('  派发专家：直接使用中文专家名');
+    }
+    if (qoderFailed) process.exitCode = 1;
     return;
   }
 
@@ -1078,6 +1280,10 @@ function install(targets = ['zcode', 'claude-code']) {
   }
   done('✅ 插件级 commands 已写入: commands/');
 
+  // 1h. 部署后校验（v3.2.5）：缺运行时组件即 exit(1)，不得只告警。
+  //     放在注册与用户级同步之前——残件不注册、不扩散到 ~/.zcode 其他目录。
+  verifyDeployment(skillDest, 'ZCode 技能');
+
   // ---------- 2. 技能独立目录（兼容仅扫描 ~/.zcode/skills 的版本） ----------
   //
   // **删前备份**（缺陷 #17b）：这个目录是**用户目录**，不是缓存。
@@ -1090,6 +1296,8 @@ function install(targets = ['zcode', 'claude-code']) {
   done(`✅ 技能已同步: ${legacySkillDir}`
     + (skillBackup && skillBackup.path
       ? `（旧版已备份至 ${path.basename(skillBackup.path)}）` : ''));
+  // 用户级技能目录同样校验：/wf:* 命令按此路径引用运行时脚本。
+  verifyDeployment(legacySkillDir, 'ZCode 用户技能');
 
   // ---------- 2b. 命令兜底目录 -> ~/.zcode/commands/ ----------
   //     ZCode 的命令发现顺序里 user scope 优先于 plugin root；
@@ -1288,6 +1496,7 @@ function install(targets = ['zcode', 'claude-code']) {
   if (DRY_RUN) {
     log('ℹ️  dry-run 结束：以上为计划执行的动作，磁盘未改动。');
     log('   去掉 --dry-run 即真正执行。');
+    if (qoderFailed) process.exitCode = 1;
     return;
   }
   log('🎉 部署完成！请重启 ZCode 使配置生效。');
@@ -1296,6 +1505,12 @@ function install(targets = ['zcode', 'claude-code']) {
   log(`  1. 设置 → 插件：应出现 ${PLUGIN_NAME} v${version}`);
   log(`  2. 设置 → 子智能体：应出现 ${managerCount} 个新增总经理`);
   log('  3. 会话中直接下达专业任务（/wf:triage、/wf:plan、/wf:check 为显式入口）');
+  if (wantClaude) log('  Claude Code 侧已同时部署（/plugin 中查看）');
+  if (wantQoder && !qoderFailed) log('  Qoder 侧已同时部署（重启/新建任务后可用 /wf:*）');
+  if (qoderFailed) {
+    log('  ⚠️  Qoder 侧部署失败；ZCode/Claude 已正常完成');
+    process.exitCode = 1;
+  }
 }
 
 function uninstall() {
@@ -1458,16 +1673,33 @@ function uninstall() {
   //   - 已空的命令目录 commands/wf/（文件删完后若空则删目录）
   //   - 已空的 expert-system/ 目录（清单删完后若空则删目录）
   //
-  // --purge 时额外清理用户运行时数据 expert-system/context/，
-  // 实现彻底删除（默认保留，属用户数据）。
+  // --purge 时额外清理用户运行时数据 expert-system/context/ 与含用户文件的
+  // 备份目录，实现彻底删除（默认都保留，属用户数据）。
 
   // 5a. 备份目录（只删 .bak-<ts> 形式，不误删用户自建的其他目录）
+  //
+  // C1（2026-11-26）：卸载**默认只删空备份**。备份是安装时 rename 出来的
+  // 旧技能目录，里面可能有用户自己写的文件（笔记、自定义 references 等）；
+  // 旧实现在无 --purge 时无条件 rmSync，等于「卸载顺手销毁用户数据」，
+  // 且真实模式经 act() 静默执行、连一行日志都没有。现在的口径与安装侧
+  // 完全一致（同一个 hasUserFiles 判定）：含用户文件的备份保留并打印路径，
+  // 只有显式 --purge 才删除。
   const skillsBase = path.join(zcodeDir, 'skills');
   if (fs.existsSync(skillsBase)) {
     for (const entry of fs.readdirSync(skillsBase, { withFileTypes: true })) {
-      if (entry.isDirectory() && entry.name.startsWith(`${SKILL_NAME}.bak-`)) {
-        removePath(path.join(skillsBase, entry.name), `删除备份目录 ${entry.name}`);
+      if (!entry.isDirectory() || !entry.name.startsWith(`${SKILL_NAME}.bak-`)) continue;
+      const bakPath = path.join(skillsBase, entry.name);
+      const userFiles = hasUserFiles(bakPath);
+      if (userFiles && !PURGE) {
+        log(`ℹ️  备份含用户自己的文件，保留：${bakPath}`);
+        log('   确认无需后可手工删除，或加 --purge 连同用户文件一起清除。');
+        continue;
       }
+      const bakFiles = countFiles(bakPath);
+      const reason = userFiles ? '（--purge：含用户文件）' : '（空备份）';
+      act(`删除备份目录 ${bakPath}${reason}`,
+        () => fs.rmSync(bakPath, { recursive: true, force: true }));
+      done(`✅ 已删除备份目录${reason}：${bakPath}（${bakFiles} 个文件）`);
     }
   }
 
@@ -1519,72 +1751,107 @@ function parseTargetsArg() {
     }
   }
   if (raw === null) return null;
-  const valid = new Set(['zcode', 'claude-code']);
+  const valid = new Set(['zcode', 'claude-code', 'qoder']);
   const list = raw.split(',').map((s) => s.trim()).filter(Boolean);
   const bad = list.filter((s) => !valid.has(s));
   if (bad.length) {
-    log(`❌ 未知目标：${bad.join(', ')}（可选：zcode, claude-code）`);
+    log(`❌ 未知目标：${bad.join(', ')}（可选：zcode, claude-code, qoder）`);
     process.exit(1);
   }
   if (list.length === 0) {
-    log('❌ --targets 不能为空（可选：zcode, claude-code）');
+    log('❌ --targets 不能为空（可选：zcode, claude-code, qoder）');
     process.exit(1);
   }
   return list;
 }
 
 /**
- * 解析卸载目标标志 --zcode / --claude-code。
- * 返回 'zcode' | 'claude-code' | 'both'（未指定时为 'both'）。
+ * 解析卸载目标标志 --zcode / --claude-code / --qoder / --all。
+ * 未指定任何标志时返回 null，由交互菜单选择；非 TTY 回退历史默认。
  */
 function parseUninstallTarget() {
   const argv = process.argv;
   let hasZcode = false;
   let hasClaude = false;
+  let hasQoder = false;
   for (const a of argv) {
     if (a === '--zcode') hasZcode = true;
     else if (a === '--claude-code') hasClaude = true;
+    else if (a === '--qoder') hasQoder = true;
+    else if (a === '--all') {
+      hasZcode = true;
+      hasClaude = true;
+      hasQoder = true;
+    }
   }
-  if (hasZcode && hasClaude) return 'both';
-  if (hasZcode) return 'zcode';
-  if (hasClaude) return 'claude-code';
-  return 'both';
+  if (!hasZcode && !hasClaude && !hasQoder) {
+    return null;
+  }
+  const targets = [];
+  if (hasClaude) targets.push('claude-code');
+  if (hasQoder) targets.push('qoder');
+  if (hasZcode) targets.push('zcode');
+  return targets;
+}
+
+function uninstallQoder() {
+  const args = [path.join(__dirname, 'install-qoder.js'), '--uninstall'];
+  if (DRY_RUN) args.push('--dry-run');
+  if (PURGE) args.push('--purge');
+  const res = spawnSync(process.execPath, args, {
+    stdio: 'inherit', cwd: PROJECT_ROOT, env: process.env,
+  });
+  if (res.status !== 0) {
+    log('❌ Qoder 卸载失败');
+    process.exit(1);
+  }
 }
 
 async function main() {
   if (arg === '--uninstall' || arg === '-u') {
-    const target = parseUninstallTarget();
+    let targets = parseUninstallTarget();
+    if (targets === null) {
+      targets = await selectTargets(detectTargets(os.homedir()), {
+        action: '从哪些工具卸载',
+        noun: '卸载目标',
+        precheckAllDetected: true,
+        nonInteractiveDefault: ['claude-code', 'zcode'],
+        nonInteractiveText: 'Claude Code + ZCode（历史默认）',
+      });
+      log('');
+    }
 
-    // 统一卸载入口：按 --zcode / --claude-code 标志分发
-    if (target === 'claude-code') {
-      const { uninstallClaudeCode } = require('./cc-uninstall');
-      uninstallClaudeCode({ homeDir: os.homedir(), dryRun: DRY_RUN, logger: log });
-      return;
+    // 统一卸载入口：按 --zcode / --claude-code / --qoder 标志或菜单选择分发
+    for (const target of targets) {
+      if (target === 'claude-code') {
+        const { uninstallClaudeCode } = require('./cc-uninstall');
+        uninstallClaudeCode({ homeDir: os.homedir(), dryRun: DRY_RUN, logger: log });
+      } else if (target === 'qoder') {
+        uninstallQoder();
+      } else if (target === 'zcode') {
+        uninstall();
+      }
+      if (target !== targets[targets.length - 1]) log('');
     }
-    if (target === 'zcode') {
-      uninstall();
-      return;
-    }
-    // both：先 Claude Code，再 ZCode
-    const { uninstallClaudeCode } = require('./cc-uninstall');
-    uninstallClaudeCode({ homeDir: os.homedir(), dryRun: DRY_RUN, logger: log });
-    log('');
-    uninstall();
     return;
   }
 
   if (arg === '--help' || arg === '-h') {
     log('用法：');
-    log('  node scripts/install.js                    交互式选择安装目标');
+    log('  node scripts/install.js                    交互式选择 ZCode / Claude Code / Qoder');
     log('  node scripts/install.js --targets zcode    只装 ZCode');
     log('  node scripts/install.js --targets claude-code   只装 Claude Code');
-    log('  node scripts/install.js --targets zcode,claude-code  两者都装');
+    log('  node scripts/install.js --targets qoder    只装 Qoder');
+    log('  node scripts/install.js --targets zcode,claude-code,qoder  三者都装');
     log('');
     log('  node scripts/install.js --dry-run          预演，不改动磁盘');
-    log('  node scripts/install.js --uninstall                卸载 ZCode + Claude Code');
+    log('  node scripts/install.js --uninstall        交互式选择 ZCode / Claude Code / Qoder 卸载');
     log('  node scripts/install.js --uninstall --zcode        只卸载 ZCode');
     log('  node scripts/install.js --uninstall --claude-code  只卸载 Claude Code');
+    log('  node scripts/install.js --uninstall --qoder        只卸载 Qoder');
+    log('  node scripts/install.js --uninstall --all          三者都卸载');
     log('  node scripts/install.js --uninstall --zcode --purge  卸载 ZCode 并清除所有残留');
+    log('  非交互终端 --uninstall 无标志时回退 Claude Code + ZCode（历史默认）');
     return;
   }
 

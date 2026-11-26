@@ -12,9 +12,12 @@ ZCode Expert System v3 — 主入口：双层路由编排
 """
 
 import json
+import math
 import os
 import re
 import sys
+from collections import Counter
+from functools import lru_cache
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_DIR = os.path.join(SCRIPT_DIR, "config")
@@ -111,7 +114,7 @@ KEYWORD_MAP = {
         "安全审查", "代码审计",
         # H1 修复：补入「sql注入」「注入漏洞」「渗透测试」等复合词（长度≥4），
         # 压过 data-database 的裸 sql（长度3）。否则「渗透测试发现 SQL 注入漏洞」
-        # 会被 data-database 的 sql 劫持（最长关键词独胜），误路由到数据库领域。
+        # 会被 data-database 的 sql 劫持（短词被误当强证据），误路由到数据库领域。
         # 裸「渗透」「漏洞」保留（长度2），用于无 sql 语境的安全任务。
         "sql注入", "注入漏洞", "渗透测试", "注入攻击", "sql注入漏洞",
     ],
@@ -135,6 +138,7 @@ KEYWORD_MAP = {
     "healthcare": [
         "医疗", "健康", "护理", "医院", "医生", "临床", "患者", "药品", "诊疗",
         "循证", "病历", "手术", "康复", "养老", "照护",
+        "医疗账单", "icd", "cpt", "病历编码", "医保结算",
     ],
     "game-dev": [
         "游戏", "unity", "unreal", "godot", "关卡设计", "游戏设计", "游戏引擎",
@@ -144,6 +148,7 @@ KEYWORD_MAP = {
         "ui设计", "ux", "视觉设计", "品牌设计", "品牌视觉", "logo", "图标设计",
         "配色", "用户体验", "界面设计", "视觉识别", "vi设计", "设计规范",
         "交互设计", "原型设计", "figma",
+        "可用性测试", "用户研究", "ux研究", "用户访谈",
     ],
     "marketing-growth": [
         "营销", "seo", "推广", "品牌营销", "社交媒体", "增长黑客", "电商运营",
@@ -170,6 +175,7 @@ KEYWORD_MAP = {
     "customer-support": [
         "客服", "客户服务", "技术支持", "faq", "帮助文档", "售后", "工单",
         "客户支持", "客户咨询", "投诉处理", "客诉", "满意度",
+        "客户成功", "客户成功流程", "客户健康度",
     ],
     "data-testing": [
         "测试", "qa", "自动化测试", "性能测试", "单元测试", "集成测试", "回归测试",
@@ -199,6 +205,7 @@ KEYWORD_MAP = {
     "government-public": [
         "政务", "政府", "tog", "标书", "投标", "高考", "志愿填报", "留学",
         "签证", "公共政策", "事业单位",
+        "政务标书", "等保标书", "信创标书", "政务数字化", "等保合规标书", "等保合规",
     ],
     "product-management": [
         "产品规划", "产品设计", "产品经理", "需求分析", "需求优先级", "用户研究",
@@ -209,7 +216,7 @@ KEYWORD_MAP = {
         "文档生成", "研究综合", "证据综合",
     ],
     "agent-governance": [
-        "智能体", "agent", "mcp", "工具调用", "多智能体", "编排", "身份图谱",
+        "智能体", "agent", "mcp", "工具调用", "编排", "身份图谱",
         "ai治理", "ai agent",
     ],
     "language-translation": [
@@ -219,6 +226,10 @@ KEYWORD_MAP = {
     "data-database": [
         "数据库", "db", "sql", "数据仓库", "数据湖", "etl", "elt", "spark", "dbt",
         "索引优化", "慢查询", "主从", "分库分表", "数据建模", "gaussdb",
+        # 检索/排序质量：这些是“搜索相关性工程师”的正向证据。
+        # 只收复合词，不收裸“搜索/相关性/排序”，避免劫持普通检索需求。
+        "搜索相关性", "检索相关性", "相关性评估", "召回率", "排序质量",
+        "分词器", "评测集", "标注集", "误判率", "专家路由",
     ],
     "frontend-client": [
         "前端", "react", "vue", "angular", "svelte", "css", "html", "微信小程序",
@@ -270,6 +281,7 @@ KEYWORD_MAP = {
         "redis",
         "缓存",
         "架构",
+        "飞书", "钉钉", "飞书审批流", "钉钉审批流", "webhook", "低代码",
     ],
     "ai-llm": [
         "ai", "llm", "rag", "大模型", "大语言模型", "语言模型", "人工智能",
@@ -280,6 +292,7 @@ KEYWORD_MAP = {
         "向量库",
         "向量检索",
         "训练数据",
+        "多智能体",
     ],
     "devops-operations": [
         "devops", "ci/cd", "jenkins", "github actions", "gitlab ci", "docker",
@@ -327,6 +340,10 @@ KEYWORD_MAP = {
         # 注意：不单独加「评估」——security-compliance 的「安全评估」已含词元
         # "评估"，单独加会制造跨类并列并破坏同分决胜的声明序契约；改用更具体的短语。
         "审查", "诊断", "梳理", "检查", "冲突", "问题排查", "代码检查",
+        # 插件/CLI/工作流修复：安装注册与工作流修复的正向证据。
+        # 只收复合词，避免裸“插件/安装/注册”劫持普通后端任务。
+        "插件安装", "插件注册", "安装注册", "命令行工具", "cli工具",
+        "工作流修复", "路由准确率", "分类准确率",
         # R7：移除「合规检查」——合规属 legal-compliance/security-compliance，
         # 放在通用工程词里是错位。合规语义由 legal-compliance 的「合规」承接。
     ],
@@ -342,88 +359,192 @@ KEYWORD_MAP = {
 }
 
 
-def classify_task_detailed(task_description):
+def _keyword_weight(keyword):
+    """分类精确关键词的证据权重：长度越长，证据越强。
+
+    2 字 1.0 / 3 字 1.5 / 4 字 2.0 / 5+ 字按 0.2 递增（上限 3.0）。
+    这样「客户成功流程」(6) 才能压过「客户成功」(4)，
+    「等保合规标书」(6) 才能压过「等保」(2)。
     """
-    第一层：任务分类（带置信度与备选）
+    n = len(keyword or "")
+    if n <= 2:
+        return 1.0
+    if n == 3:
+        return 1.5
+    if n == 4:
+        return 2.0
+    return min(3.0, 2.0 + 0.2 * (n - 4))
 
-    返回：(category, confidence, alternatives)
-      - confidence: 0~1。1.0 表示关键词唯一命中且无并列；
-                    0.0 表示完全无信号，落入默认兜底。
-      - alternatives: 与选中分类同分的其他分类，按声明优先级排序。
-                      无并列时为空列表。
 
-    设计意图：低置信度不再静默返回单一结论。调用方（SKILL.md 路由层、
-    研发工作流）可据此决定「直接采信」还是「向老板澄清一句」。
+DOMAIN_INTENT_WORDS = (
+    "说明", "解释", "分析", "评估", "审查", "审计", "对比", "是什么",
+    "区别", "只读", "讲解", "怎么理解",
+)
+# 讨论“路由/分类/专家选择”本身时，测试/评估/审计是宾语，不是领域证据。
+ROUTER_META_TERMS = ("路由", "分类", "准确率", "误判", "专家", "词面", "词元")
+META_DOMAIN_WORDS = ("测试", "评估", "审计", "审查", "分析", "操作")
+
+
+def _domain_intent(text):
+    return any(w in (text or "") for w in DOMAIN_INTENT_WORDS)
+
+
+def _router_meta_task(text):
+    return any(w in (text or "") for w in ROUTER_META_TERMS)
+
+
+def _confidence_from_scores(top, second, evidence, tied):
+    """把 top1/top2 变成可解释置信度：绝对分 × margin。"""
+    if top <= 0:
+        return 0.0, 0.0, 0.0
+    margin = max(0.0, (top - second) / float(top))
+    abs_score = min(1.0, top / 2.0)
+    conf = abs_score * (0.5 + 0.5 * margin)
+    # 并列或间隔过小：胜者只靠声明序/微小分差，不能给高置信。
+    if tied or margin < 0.15:
+        conf = min(conf, 0.45)
+    return round(conf, 4), round(margin, 4), round(abs_score, 4)
+
+
+def classify_task_with_evidence(task_description):
+    """分类并返回 (category, confidence, alternatives, confidence_detail)。
+
+    confidence 不再只表示“词面强度”，而是 **绝对证据 × top1-top2 margin**：
+      - 单 2 字关键词：最高 0.5；
+      - 真并列：最高 0.45；
+      - 4 字以上复合词/多关键词：可到 1.0。
+    调用方据此决定是否必须语义复核/阻断派发。
     """
     if not task_description:
-        return DEFAULT_CATEGORY, 0.0, []
+        return DEFAULT_CATEGORY, 0.0, [], {"evidence": "none", "top_score": 0.0,
+                                          "second_score": 0.0, "margin": 0.0}
 
     # 尝试 LLM 分类（生产环境 _call_llm 恒返回 None，此层为将来留下接口）
     category = classify_task_with_llm(task_description)
     if category and category in CATEGORIES:
-        return category, 1.0, []
+        return category, 1.0, [], {"evidence": "semantic", "top_score": 2.0,
+                                   "second_score": 0.0, "margin": 1.0}
 
     text = task_description.lower()
+    domain_intent = _domain_intent(text)
+    router_meta = _router_meta_task(text)
 
-    # 退化一：精确关键词命中，取命中的最长关键词所属分类。
-    # 长短关键词分属不同分类且等长时，按 KEYWORD_MAP 声明优先级决胜。
-    #
+    # 退化一：精确关键词命中，按关键词长度加权，取最高证据分类。
     # ASCII 关键词必须整词匹配：中文用子串包含是对的（中文无词边界），
     # 但英文/数字关键词用裸 `in` 会被别的单词碎片劫持——
     # `ai` 命中 em[ai]l / det[ai]l / m[ai]n，`db` 命中 g[db]。
-    best_cat, best_len = None, 0
-    hit_lengths = {}
+    cat_scores = {}
+    cat_keywords = {}
     for cat, keywords in KEYWORD_MAP.items():
         for kw in keywords:
             k = kw.lower()
             if not k:
                 continue
             if _keyword_hits(k, text):
-                hit_lengths.setdefault(len(k), []).append(cat)
-                if len(k) > best_len:
-                    best_cat, best_len = cat, len(k)
-    if best_cat:
-        # 同长度命中多个分类：声明序最靠前者胜，其余作备选。
-        # 注意：必须先按分类去重再判并列——同一分类命中多个等长关键词时
-        # hit_lengths 会把同名分类追加多次，直接 len() 会把「自己和自己」
-        # 误判为跨分类并列，导致 conf 被无故压到 0.75 而 alternatives 去重后为空，
-        # 返回值自相矛盾（伪并列）。
-        tied_cats = hit_lengths.get(best_len, [])
+                w = _keyword_weight(k)
+                if w > cat_scores.get(cat, 0.0):
+                    cat_scores[cat] = w
+                cat_keywords.setdefault(cat, []).append(k)
+    if cat_scores:
         declared_order = list(KEYWORD_MAP)
-        unique_tied = sorted(set(tied_cats), key=declared_order.index)
-        if len(unique_tied) > 1:
-            best_cat = unique_tied[0]
-            alternatives = unique_tied[1:]
-            # 最长关键词唯一，但存在同长度竞争 → 中等置信度
-            return best_cat, 0.75, alternatives
-        return unique_tied[0] if unique_tied else best_cat, 1.0, []
+        top_score = max(cat_scores.values())
+        winners = sorted(
+            (cat for cat, score in cat_scores.items() if score == top_score),
+            key=declared_order.index,
+        )
+        winner = winners[0]
+        alternatives = winners[1:]
+        second_score = max(
+            (score for cat, score in cat_scores.items() if cat != winner),
+            default=0.0,
+        )
+        tied = bool(alternatives)
+        confidence, margin, abs_score = _confidence_from_scores(
+            top_score, second_score, "exact_keyword", tied)
+        # 单弱词（只有一个 2 字关键词）不得冒充高置信。
+        weak_single = (
+            not tied and top_score <= 1.0
+            and len(cat_keywords.get(winner, [])) == 1
+        )
+        if weak_single:
+            confidence = min(confidence, 0.5)
+        # 讨论“路由/分类/专家选择”本身时，测试/评估/审计只是宾语。
+        # 不改变分类（缺少复合词时硬改会错到别的域），只把置信度压到阻断区，
+        # 让主控澄清，而不是自信地派错专家。
+        meta_only = bool(
+            domain_intent and router_meta
+            and cat_keywords.get(winner)
+            and all(k in META_DOMAIN_WORDS for k in cat_keywords[winner])
+        )
+        if meta_only:
+            confidence = min(confidence, 0.45)
+        detail = {
+            "evidence": "exact_keyword",
+            "top_score": round(top_score, 4),
+            "second_score": round(second_score, 4),
+            "margin": margin,
+            "abs_score": abs_score,
+            "matched_keywords": sorted(cat_keywords.get(winner, [])),
+            "weak_single": weak_single,
+            "tied": tied,
+            "intent": "explain" if domain_intent else "other",
+            "intent_downgraded": meta_only,
+        }
+        return winner, confidence, alternatives, detail
 
     # 退化二：词元加权重叠打分，取最高分分类
     task_tokens = _tokenize(task_description)
     if task_tokens:
         scored = []
+        descriptions = _category_descriptions()
         for cat, keywords in KEYWORD_MAP.items():
-            score = _category_affinity_score(task_tokens, keywords)
+            score = _category_affinity_score(
+                task_tokens, keywords, description=descriptions.get(cat, ""))
             if score > 0:
                 scored.append((score, cat))
 
         if scored:
             top_score = max(s for s, _ in scored)
-            # 稳定排序 + 显式按声明优先级决胜：
-            # 旧实现用 scored.sort(reverse=True) 对 (score, cat) 元组整体排序，
-            # 同分时按分类名字母序倒序决胜，与 KEYWORD_MAP 声明的优先级相反。
             declared_order = list(KEYWORD_MAP)
             winners = sorted(
                 (cat for s, cat in scored if s == top_score),
                 key=declared_order.index,
             )
             alternatives = winners[1:]
-            # 满分 1.0 仅在唯一命中时给出；有并列按并列数摊薄置信度
-            confidence = top_score if not alternatives else top_score * 0.75
-            return winners[0], round(confidence, 4), alternatives
+            second_score = max(
+                (s for s, cat in scored if cat != winners[0]),
+                default=0.0,
+            )
+            confidence, margin, abs_score = _confidence_from_scores(
+                top_score, second_score, "token_overlap", bool(alternatives))
+            detail = {
+                "evidence": "token_overlap",
+                "top_score": round(top_score, 4),
+                "second_score": round(second_score, 4),
+                "margin": margin,
+                "abs_score": abs_score,
+                "matched_keywords": [],
+                "weak_single": False,
+                "tied": bool(alternatives),
+                "intent": "explain" if domain_intent else "other",
+                "intent_downgraded": False,
+            }
+            return winners[0], confidence, alternatives, detail
 
     # 完全无信号：显式标记 0 置信度，不伪装成正常分类
-    return DEFAULT_CATEGORY, 0.0, []
+    return DEFAULT_CATEGORY, 0.0, [], {"evidence": "none", "top_score": 0.0,
+                                      "second_score": 0.0, "margin": 0.0}
+
+
+def classify_task_detailed(task_description):
+    """兼容入口：返回 (category, confidence, alternatives)。
+
+    confidence 语义见 classify_task_with_evidence：绝对证据 × margin，
+    不再是“最长关键词唯一命中即 1.0”。
+    """
+    category, confidence, alternatives, _detail = classify_task_with_evidence(
+        task_description)
+    return category, confidence, alternatives
 
 
 def classify_task(task_description):
@@ -434,8 +555,8 @@ def classify_task(task_description):
     这是 `classify_task_detailed` 的简化包装，保持既有调用方的 str 契约。
     需要置信度或备选分类时请直接用 `classify_task_detailed`。
 
-    降级链：LLM 分类 → 最长关键词命中 → 词元加权重叠打分 → 默认分类。
-    「最长关键词优先」可避免短词（如 "api"）抢先命中宽泛分类；
+    降级链：LLM 分类 → 关键词加权命中 → 词元加权重叠打分 → 默认分类。
+    「关键词加权命中」用长度权重避免短词（如 "api"）抢先命中宽泛分类；
     同分一律按 KEYWORD_MAP 的声明优先级决胜（声明序即优先级）。
     """
     category, _confidence, _alternatives = classify_task_detailed(task_description)
@@ -514,6 +635,7 @@ STOP_TOKENS = {
     "设计", "开发", "优化", "管理", "分析", "系统", "方案", "制定", "实现",
     "搭建", "建设", "处理", "支持", "服务", "工作", "流程", "方法", "问题",
     "需求", "相关", "进行", "一个", "如何", "怎么", "帮我", "需要", "以及",
+    "作流",  # 「工作流」的 bigram 残片：高频泛化词，不应决定专家排序
     "我们", "你们", "可以", "这个", "那个", "什么",
 }
 
@@ -527,7 +649,27 @@ GENERIC_TOKEN_WEIGHT = 0.25
 LOW_CONFIDENCE_THRESHOLD = 0.5
 
 
-def _category_affinity_score(task_tokens, keywords, stop_weight=None):
+@lru_cache(maxsize=1)
+def _category_descriptions():
+    """读取 config/categories.json 的 description 作为类目语义画像。
+
+    当前只有部分类目有 description；缺失时返回空串，不报错。
+    以后补齐 32 类后，无需改代码即可参与词元层打分。
+    """
+    path = os.path.join(CONFIG_DIR, "categories.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return {
+        key: (value or {}).get("description", "")
+        for key, value in data.items()
+        if isinstance(value, dict)
+    }
+
+
+def _category_affinity_score(task_tokens, keywords, stop_weight=None, description=""):
     """单分类的亲和度打分（0~1）。泛化词按 stop_weight 降权计分。
 
     与 `_keyword_score` 的区别：本函数只服务**分类**（task_tokens 对分类
@@ -539,7 +681,7 @@ def _category_affinity_score(task_tokens, keywords, stop_weight=None):
     if not task_tokens:
         return 0.0
 
-    kw_tokens = _tokenize(" ".join(keywords))
+    kw_tokens = _tokenize(" ".join(keywords) + " " + (description or ""))
     if not kw_tokens:
         return 0.0
 
@@ -554,8 +696,12 @@ def _category_affinity_score(task_tokens, keywords, stop_weight=None):
     return weighted / float(len(task_tokens))
 
 
-def _load_prompt_head(expert, limit=3000):
-    """读取专家提示词文件开头部分，用于在无模型时提供更丰富的领域词。"""
+def _load_prompt_head(expert, limit=800):
+    """读取专家提示词文件开头部分，用于在无模型时提供更丰富的领域词。
+
+    800 字上限是刻意的：旧实现读 3000 字，prompt_hits 事实上压过 name，
+    导致“描述写得长”的专家占绝对便宜。
+    """
     filename = expert.get("file")
     if not filename:
         return ""
@@ -565,6 +711,59 @@ def _load_prompt_head(expert, limit=3000):
             return f.read(limit)
     except (OSError, UnicodeDecodeError):
         return ""
+
+
+@lru_cache(maxsize=1)
+def _expert_token_stats():
+    """331 位专家语料的 token 文档频率（df）与总数。
+
+    只读一次并缓存；df 用来过滤“专家/测试/评估”这类高 df 噪声，
+    避免它们靠 name 的 3 倍权重或长 prompt 决定专家排序。
+    """
+    df = Counter()
+    experts = load_experts() or []
+    for expert in experts:
+        tokens = (
+            _tokenize(expert.get("name", ""))
+            | _tokenize(expert.get("description", ""))
+            | _tokenize(_load_prompt_head(expert))
+        )
+        df.update(tokens)
+    return df, len(experts)
+
+
+LOW_INFO_TOKENS = {"专家"}
+ROUTER_META_LOW_INFO = {"专家", "测试", "评估", "审计", "审查", "分析", "操作"}
+ROUTER_META_TOKEN_HINTS = ("路由", "分类", "误判", "专家", "准确", "词面", "词元")
+INSTALL_META_HINTS = ("安装", "注册", "插件")
+
+
+def _is_low_information(token, task_tokens):
+    """低区分度 token：不参与专家排序，避免“专家/测试/评估”噪声决胜。"""
+    if token in LOW_INFO_TOKENS:
+        return True
+    if token in ROUTER_META_LOW_INFO and any(
+            h in task_tokens for h in ROUTER_META_TOKEN_HINTS):
+        return True
+    # 安装/注册语境下，「审计/操作」是顺带动作，不是财务/安全域证据。
+    if token in {"审计", "操作"} and any(
+            h in task_tokens for h in INSTALL_META_HINTS):
+        return True
+    return False
+
+
+def _filtered_hits(effective, field_tokens, task_tokens):
+    return {
+        t for t in effective & field_tokens
+        if not _is_low_information(t, task_tokens)
+    }
+
+
+def _token_idf(token):
+    df, total = _expert_token_stats()
+    if total <= 0:
+        return 0.0
+    return math.log(1.0 + total / float(1 + df.get(token, 0)))
 
 
 def _keyword_score_raw(task_tokens, expert):
@@ -583,10 +782,15 @@ def _keyword_score_raw(task_tokens, expert):
     if not effective:
         return 0.0
     total = len(effective)
-    name_hits = len(effective & _tokenize(expert.get("name", "")))
-    desc_hits = len(effective & _tokenize(expert.get("description", "")))
-    prompt_hits = len(effective & _tokenize(_load_prompt_head(expert)))
-    return (3.0 * name_hits + 1.0 * desc_hits + 1.0 * prompt_hits) / float(3.0 * total)
+    name_hits = _filtered_hits(
+        effective, _tokenize(expert.get("name", "")), task_tokens)
+    desc_hits = _filtered_hits(
+        effective, _tokenize(expert.get("description", "")), task_tokens)
+    prompt_hits = _filtered_hits(
+        effective, _tokenize(_load_prompt_head(expert)), task_tokens)
+    return (
+        3.0 * len(name_hits) + 1.0 * len(desc_hits) + 1.0 * len(prompt_hits)
+    ) / float(3.0 * total)
 
 
 def _keyword_score(task_tokens, expert):
@@ -716,13 +920,26 @@ def score_breakdown(task_description, expert):
     """
     task_tokens = _tokenize(task_description)
     effective = {t for t in task_tokens if t not in STOP_TOKENS} or task_tokens
-    name_hits = effective & _tokenize(expert.get("name", ""))
-    desc_hits = effective & _tokenize(expert.get("description", ""))
-    prompt_hits = effective & _tokenize(_load_prompt_head(expert))
+    name_hits = _filtered_hits(
+        effective, _tokenize(expert.get("name", "")), task_tokens)
+    desc_hits = _filtered_hits(
+        effective, _tokenize(expert.get("description", "")), task_tokens)
+    prompt_hits = _filtered_hits(
+        effective, _tokenize(_load_prompt_head(expert)), task_tokens)
     return {
         "name_hits": len(name_hits),
         "desc_hits": len(desc_hits),
         "prompt_hits": len(prompt_hits),
+        "name_idf": round(sum(_token_idf(t) for t in name_hits), 4),
+        "desc_idf": round(sum(_token_idf(t) for t in desc_hits), 4),
+        "prompt_idf": round(sum(_token_idf(t) for t in prompt_hits), 4),
+        "filtered_low_info": sorted(
+            (effective & (
+                _tokenize(expert.get("name", ""))
+                | _tokenize(expert.get("description", ""))
+                | _tokenize(_load_prompt_head(expert))
+            )) - (name_hits | desc_hits | prompt_hits)
+        ),
         "matched_in_name": sorted(name_hits),
         "matched_in_desc": sorted(desc_hits),
         "raw_score": round(_keyword_score_raw(task_tokens, expert), 4),
@@ -775,6 +992,8 @@ def dispatch_manager(category, task_description, selected_expert, top_candidates
 
     manager_result = {
         "agent": manager_id,
+        "display_name": manager_id,
+        "display_label": f"经理：{manager_id}",
         "category": category,
         # L1 修复：无专家时 status 为 no_expert（与 expert_result.skipped 对齐），
         # 有专家时才为 dispatched/plan_ready。避免消费方误判总经理派发成功。
@@ -844,9 +1063,13 @@ def dispatch_expert(selected_expert, task_description, context_summary="", role_
     if role_prefix:
         prompt = f"{role_prefix}{prompt}"
 
+    display_label = f"专家：{expert_name}"
     return {
         "agent": selected_expert.get("id", "expert-unknown"),
         "expert_name": expert_name,
+        # 宿主 UI 直接用这个字段展示专家身份；不要只显示 "Agent"。
+        "display_name": expert_name,
+        "display_label": display_label,
         "expert_category": selected_expert.get("category"),
         "expert_file": selected_expert.get("file"),
         # pending_dispatch：等待主控用 Agent 工具实际派发
@@ -854,7 +1077,8 @@ def dispatch_expert(selected_expert, task_description, context_summary="", role_
         "dispatch": {
             "tool": "Agent",
             "subagent_type": _qualified_subagent_type(expert_name),
-            "description": f"{expert_name} 执行任务",
+            # Agent/Task 的可见标题优先显示专家名。
+            "description": display_label,
             "prompt": prompt,
         },
         "fallback": (
@@ -947,8 +1171,8 @@ def zcode_expert_system(task_description, task_id=None, persist=True):
             readonly 分析不写上下文），其余返回结构不变。
 
     返回:
-        dict: 包含 category, confidence, alternatives, manager_id,
-              selected_expert, manager_result, expert_result, context
+        dict: 包含 category, confidence, confidence_detail, alternatives,
+              manager_id, selected_expert, manager_result, expert_result, context
 
     confidence < LOW_CONFIDENCE_THRESHOLD 时，调用方（SKILL.md 路由层）
     应先向老板澄清任务领域，而不是直接采信分类结果派专家。
@@ -956,8 +1180,10 @@ def zcode_expert_system(task_description, task_id=None, persist=True):
     if not task_description:
         task_description = ""
 
-    # 第一层：任务分类（带置信度与备选）
-    category, confidence, alternatives = classify_task_detailed(task_description)
+    # 第一层：任务分类（带置信度、备选与证据明细）
+    category, confidence, alternatives, confidence_detail = (
+        classify_task_with_evidence(task_description)
+    )
 
     # 获取对应的领域总经理
     manager_id = get_manager(category)
@@ -1037,7 +1263,7 @@ def zcode_expert_system(task_description, task_id=None, persist=True):
     # 路由告警：两个独立触发条件，不可只判置信度
     #
     # ① selected_expert 为 None —— 无论 confidence 多高都必须告警。
-    #    实测「编译报错」返回 conf=1.0（关键词「报错」唯一命中 devops）但
+    #    实测「编译报错」返回较高 confidence（关键词「报错」命中 devops）但
     #    该分类下没有匹配专家 → selected_expert=None。若只按 conf<0.5 判，
     #    调用方看到 1.0 会直接按 selected_expert 派发，拿到 None 后无规则可依，
     #    属静默失效。
@@ -1081,6 +1307,7 @@ def zcode_expert_system(task_description, task_id=None, persist=True):
     return {
         "category": category,
         "confidence": confidence,
+        "confidence_detail": confidence_detail,
         "alternatives": alternatives,
         "routing_warning": routing_warning,
         # H2 修复标记：分类置信度>0 但无匹配专家时置 True，消费方据此不得按 conf 直接派发

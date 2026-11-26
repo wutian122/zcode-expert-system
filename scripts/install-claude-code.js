@@ -73,7 +73,7 @@ const SKIP_REL_PATHS = new Set(['context/store']);
 /** 市场目录里要复制的插件组件（相对源码根） */
 const PLUGIN_COMPONENTS = [
   '.claude-plugin', 'agents', 'commands', 'hooks',
-  'scripts', 'config', 'references', 'templates', 'bin',
+  'scripts', 'config', 'references', 'templates', 'bin', 'context',
 ];
 
 /**
@@ -87,6 +87,7 @@ const UNPACKED_COMPONENTS = ['src/'];
 
 /** 插件根目录需单独复制的顶层主脚本 */
 const PLUGIN_ROOT_FILES = [
+  'SKILL.md',
   'zcode_dev_workflow.py', 'zcode_expert_system.py', 'skill_entry.py',
 ];
 
@@ -143,15 +144,83 @@ function pluginInstalled(homeDir) {
   return Boolean(installed && installed.plugins && installed.plugins[`${PLUGIN_NAME}@${MARKETPLACE}`]);
 }
 
-/** 部署必需组件清单——缺一不可，缺失即中止（R5：对齐 install.js P5 契约「先校验、后动手」） */
+/** 部署必需组件清单——缺一不可，缺失即中止（R5：对齐 install.js P5 契约「先校验、后动手」）
+ *
+ * v3.2.5：加入运行时组件。此前只查目录存在，`scripts/workflow_check.py`
+ * 缺失、`config/categories.json` 的 description 缺项、`templates/`
+ * `references/` 未随包分发时，安装器仍然报告成功——`/wf:*` 命令与类目
+ * 画像在部署布局下全部落空。
+ */
 const DEPLOY_REQUIRED = [
   'SKILL.md', 'config', 'agents', 'commands', '.claude-plugin',
-  'hooks', 'scripts',
+  'hooks', 'scripts', 'templates', 'references',
+  'scripts/workflow_check.py', 'config/categories.json',
 ];
+
+/** 部署副本必须存在的运行时组件（相对插件根）。context/bin 由 PLUGIN_COMPONENTS 覆盖。 */
+const RUNTIME_COMPONENTS = [
+  'scripts/workflow_check.py',
+  'config/categories.json',
+  'config/experts.json',
+  'config/workflow.json',
+  'templates',
+  'references',
+  'agents',
+  'commands',
+  'hooks',
+  'context',
+  'bin',
+  'SKILL.md',
+  'zcode_dev_workflow.py',
+  'zcode_expert_system.py',
+  'skill_entry.py',
+];
+
+/** 校验 `<root>/config/categories.json`：32 类且每类 description 可读。 */
+function checkCategoriesProfile(root) {
+  const file = path.join(root, 'config', 'categories.json');
+  if (!fs.existsSync(file)) return [`缺 config/categories.json：${file}`];
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    return [`config/categories.json 不是合法 JSON：${err.message}`];
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return ['config/categories.json 顶层必须是对象（分类名 → 分类定义）'];
+  }
+  const problems = [];
+  const keys = Object.keys(data);
+  if (keys.length !== 32) {
+    problems.push(`config/categories.json 分类数 ${keys.length}（应为 32）`);
+  }
+  const noDesc = keys.filter(
+    (k) => !data[k] || !String(data[k].description || '').trim());
+  if (noDesc.length) {
+    problems.push(
+      `config/categories.json 有 ${noDesc.length} 个分类缺 description：`
+      + noDesc.slice(0, 6).join(', '));
+  }
+  return problems;
+}
+
+/** 部署副本的运行时组件问题列表（空数组即通过）。 */
+function runtimeProblems(root) {
+  const problems = RUNTIME_COMPONENTS
+    .filter((rel) => !fs.existsSync(path.join(root, rel)))
+    .map((rel) => `缺 ${rel}`);
+  problems.push(...checkCategoriesProfile(root));
+  return problems;
+}
 
 /**
  * 源树完整性预检：部署必需组件缺失时抛错中止。
  * 在删除任何现有目录之前执行，落实 P5 契约「先校验、后动手」。
+ *
+ * 同时校验 .claude-plugin/plugin.json 不得含 agents 字段：
+ * 本机 Claude Code 的 manifest schema 规定 agents 必须是**单个 .md 文件**
+ * （"Invalid string: must end with .md"），声明目录会令整个插件加载失败。
+ * 363 个专家靠约定式扫描 agents/ 目录注册，无需该字段。
  */
 function preflightCheck() {
   const missing = DEPLOY_REQUIRED.filter(
@@ -161,6 +230,24 @@ function preflightCheck() {
     throw new Error(
       `[preflight] 源树缺少部署必需组件，中止：${missing.join(', ')}`
     );
+  }
+  const manifest = readJson(path.join(PROJECT_ROOT, '.claude-plugin', 'plugin.json'));
+  if (!manifest) {
+    throw new Error('[preflight] .claude-plugin/plugin.json 不可读或不是合法 JSON，中止');
+  }
+  if (manifest.agents) {
+    throw new Error(
+      '[preflight] .claude-plugin/plugin.json 含 "agents" 字段——'
+      + '本机 Claude Code 要求该字段必须是单个 .md 文件路径，目录声明会导致'
+      + '整个插件 manifest 校验失败（插件不可用）。请移除该字段后重试'
+      + '（agents/ 目录由约定式扫描自动注册）。'
+    );
+  }
+  // v3.2.5：类目画像（32 类 description）是域路由的语义输入，缺项即中止。
+  const profileProblems = checkCategoriesProfile(PROJECT_ROOT);
+  if (profileProblems.length > 0) {
+    throw new Error(
+      '[preflight] 源树类目画像不完整，中止：' + profileProblems.join('；'));
   }
 }
 
@@ -191,6 +278,11 @@ function buildMarketplaceDir(homeDir) {
   const marketRoot = path.join(homeDir, '.claude', 'plugins', 'marketplaces', MARKETPLACE);
   const pluginDir = path.join(marketRoot, PLUGIN_NAME);
 
+  // R5/I2：预检对**所有模式**执行，dry-run 也不例外。
+  // dry-run 的作用是「真跑之前先看」，如果它跳过预检，用户会看到一份
+  // 一切正常的计划，真跑才在写到一半时炸——预演失去意义。
+  preflightCheck();
+
   if (DRY_RUN) {
     log(`  [dry-run] 将构建市场目录: ${marketRoot}`);
     log(`  [dry-run]   - 写入 .claude-plugin/marketplace.json`);
@@ -198,9 +290,6 @@ function buildMarketplaceDir(homeDir) {
     log(`  [dry-run]   - 构建 skills/${PLUGIN_NAME}/ 镜像（命令路径对齐）`);
     return;
   }
-
-  // R5：复制前做源树完整性预检，任何删除动作之前先校验。
-  preflightCheck();
 
   let backupRoot = null;
   try {
@@ -271,6 +360,16 @@ function buildMarketplaceDir(homeDir) {
     const skillMirror = path.join(pluginDir, 'skills', PLUGIN_NAME);
     copyDir(pluginDir, skillMirror, { skip: ['skills'] });
 
+    // 5b. 复制后校验运行时组件（v3.2.5）：残件不得冒充安装成功。
+    //     workflow_check.py 是 /wf:* 的机械核对入口，categories.json 是
+    //     32 类语义画像，templates/references 是账本与阶段说明。
+    const problems = runtimeProblems(pluginDir);
+    if (problems.length > 0) {
+      throw new Error(
+        '[build] 市场目录副本缺运行时组件，中止：' + problems.join('；'));
+    }
+    log('✅ 部署校验通过：workflow_check / categories(32 类) / templates / references 均在位');
+
     // R5：部署成功，清理备份。
     if (backupRoot) fs.rmSync(backupRoot, { recursive: true, force: true });
   } catch (err) {
@@ -339,15 +438,67 @@ function verify(homeDir) {
   const regOk = Boolean(installed && installed.plugins && installed.plugins[`${PLUGIN_NAME}@${MARKETPLACE}`]);
   const enableOk = Boolean(enabled && enabled.enabledPlugins && enabled.enabledPlugins[`${PLUGIN_NAME}@${MARKETPLACE}`]);
 
+  // I6：注册成功但没启用，插件在会话里同样不可用。这里不能只警告——
+  // 警告之后还会打印「🎉 安装完成」，用户以为装好了，实际 /plugin 里是关闭态。
+  // 记为失败，验证流程走完（保留后续诊断信息）后 rc≠0。
+  let notEnabled = false;
+
   if (!regOk) {
     log('❌ 验证失败：installed_plugins.json 无插件条目');
     process.exit(1);
   }
   if (!enableOk) {
-    log('⚠️  插件已注册但未启用（enabledPlugins 无条目），请在 /plugin 中手动启用');
+    log('❌ 验证未通过：插件已注册但未启用（settings.json 的 enabledPlugins 无本条）');
+    log('   请在 Claude Code 中执行 /plugin 启用该插件，或执行 /reload-plugins 后重跑本脚本。');
+    notEnabled = true;
   } else {
     log('✅ 验证通过：插件已注册并启用');
   }
+
+  // 验证 agents 目录是否被正确部署（约定式扫描，plugin.json 不声明 agents 字段）
+  const marketAgentsDir = path.join(
+    homeDir, '.claude', 'plugins', 'marketplaces', MARKETPLACE,
+    PLUGIN_NAME, 'agents'
+  );
+  const agentCount = fs.existsSync(marketAgentsDir)
+    ? fs.readdirSync(marketAgentsDir).filter(f => f.endsWith('.md')).length
+    : 0;
+  if (agentCount === 0) {
+    log('⚠️  市场目录中 agents/ 无 .md 文件——363 个专家无法派发');
+    log('   请检查源树 agents/ 目录是否完整（约定式扫描，无需 manifest 声明）');
+  } else {
+    log(`✅ agents/ 已部署 ${agentCount} 个专家智能体`);
+  }
+
+  // 验证 plugin.json 不含 agents 字段（本机 schema：必须是单个 .md，目录声明会炸整个插件）
+  const manifestPath = path.join(
+    homeDir, '.claude', 'plugins', 'marketplaces', MARKETPLACE,
+    PLUGIN_NAME, '.claude-plugin', 'plugin.json'
+  );
+  const manifest = readJson(manifestPath);
+  if (manifest && !manifest.agents) {
+    log('✅ plugin.json 无 agents 字段（正确——agents/ 走约定式扫描）');
+  } else if (manifest && manifest.agents) {
+    log('❌ plugin.json 含 agents 字段——manifest 校验会失败，整个插件不可用');
+    log('   请移除该字段（agents/ 目录由 Claude Code 约定式扫描自动注册）');
+  }
+
+  // 验证市场副本的运行时组件（v3.2.5）：缺 workflow_check / categories /
+  // templates / references 时 /wf:* 命令与类目画像在部署布局下不可用。
+  // 这是「只复制不注册」事故的镜像面——注册成功但组件不全，同样是坏安装。
+  const deployedProblems = runtimeProblems(path.join(
+    homeDir, '.claude', 'plugins', 'marketplaces', MARKETPLACE, PLUGIN_NAME
+  ));
+  if (deployedProblems.length > 0) {
+    log('❌ 验证失败：市场副本缺运行时组件——');
+    for (const p of deployedProblems) log(`   · ${p}`);
+    log('   /wf:* 命令、类目画像、模板或参考文档会落空，请重装并检查源树。');
+    process.exit(1);
+  }
+  log('✅ 部署校验通过：workflow_check / categories(32 类) / templates / references 均在位');
+
+  // I6：启用键缺失是硬失败——rc≠0，且 install() 不会再打印「🎉 安装完成」。
+  if (notEnabled) process.exit(1);
 }
 
 function install() {
@@ -467,7 +618,12 @@ async function main() {
 
   if (wantClaude && wantZcode) {
     log('');
-    log('🎉 全部安装完成（Claude Code + ZCode）！');
+    // I2：dry-run 下不得出现「安装完成」——那是假完成。
+    if (DRY_RUN) {
+      log('ℹ️  dry-run 结束：以上为计划动作（Claude Code + ZCode），磁盘未改动。');
+    } else {
+      log('🎉 全部安装完成（Claude Code + ZCode）！');
+    }
   }
 }
 

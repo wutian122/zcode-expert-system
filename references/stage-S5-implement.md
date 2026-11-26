@@ -38,7 +38,7 @@
 ### 2. 任务 brief
 
 ```bash
-bash "${ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/sdd/task-brief" <plan.md> <N>
+bash "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/sdd/task-brief" <plan.md> <N>
 ```
 
 brief 是实施者**唯一**的任务信息来源。不往派发 prompt 灌历史摘要——文件交接。
@@ -102,11 +102,17 @@ Agent(
 
 ### 8. 原子回写（同一消息完成）
 
+- ledger `## Dispatches`：本任务的 implementer 派发行（第 3 步）与 reviewer 派发行（第 6 步）
 - ledger：`Task N: complete (commits …)` 或 `Task N: parked (reason)`
 - `tasks.md`：对应条目 `- [x]`
 - todo 勾选
 
 缺一即不得进下一任务（INV2 / INV6）。
+
+**派发行是完成态证据的一部分**：没写派发行 = 没派发。`workflow_check` 对
+「有完成行但没有 implementer 派发行」判 `S5.DISPATCH_IMPLEMENTER` FAIL；
+`agent` 必须是 `config/experts.json` 里的专家名，`category` 必须与注册表一致；
+**主控不得把自己写成 implementer**（自己改码 = 跳过审查）。
 
 ## TDD 铁律（贯穿所有模式）
 
@@ -125,6 +131,7 @@ Agent(
 ## 退出条件（G5，每任务）
 
 - [ ] brief + report + 变更集三件齐备
+- [ ] ledger `## Dispatches` 有本任务的 implementer 行与 reviewer 行（未写=未派发）
 - [ ] 审查双结论齐备（spec ✅/❌ + 质量）
 - [ ] ledger 有完成行
 - [ ] tasks.md 对应条目已勾选

@@ -23,11 +23,22 @@
 | 8 | 原子回写：ledger + tasks.md 勾选同一消息完成 | 两处 |
 | 9 | 删 workspace 前导出 P3 证据 | 计划文档 |
 
+## 派发证据（账本 `## Dispatches`）
+
+- **未写派发行 = 未派发。** `workflow_check` 只认账本里的 `dispatch ...` 行，
+  不认会话记忆：完成的任务没有 `role=implementer` 行 → `S5.DISPATCH_IMPLEMENTER` FAIL；
+  `independence: L0` 没有 `role=reviewer` 行 → `S6.L0_REQUIRES_DISPATCH` FAIL。
+- **implementer / reviewer 不得填主控。** 自己改码 = 跳过审查；自己审查 = 不得标 L0。
+  L1（主控自审降级）必须在计划 `## Rulings` 留一条 `Ruling:`。
+- `agent` 必须是 `config/experts.json` 里的专家名，`category` 必须与注册表一致；
+  reviewer 与 implementer 不得同名（同域不同人允许，但会 WARN `soft:same_domain_review`）。
+
 ## 严格禁止
 
 | 禁止 | 原因 |
 |---|---|
 | 在自己会话里替实施者改码 | 跳过审查，证据链断裂 |
+| 把自己写成 implementer/reviewer 派发行 | 主控自己实施或自审不得标 L0 |
 | 采信子代理一句"成功" | 无证据完成 |
 | 用 `HEAD~1` 取 BASE | 多提交任务被静默截断 |
 | 无基线记录就开工 | 无法区分既存失败与本次引入 |

@@ -24,10 +24,12 @@
 ## 终审
 
 ```bash
-bash "${ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/sdd/review-package" <plan> <MERGE_BASE> <HEAD>     # 有 git
+bash "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/sdd/review-package" <plan> <MERGE_BASE> <HEAD>     # 有 git
 ```
 
-用 `references/roles/reviewer.md` 模板（双结论：spec 符合性 + 代码质量），最强档专家。审查报告写 `review-<N>.md`，对照 `templates/review-report.md` 输出。
+用 `references/roles/reviewer.md` 模板（双结论：spec 符合性 + 代码质量），最强档专家。审查报告写 `review-<N>.md`，对照 `templates/review-report.md` 输出。**N 是审查轮次，不是任务号**：一次审查覆盖多个任务时仍写 `review-1.md`；`review-<range>.diff` 只是变更集文件。
+
+独立性标记语义：`L0` = 独立审查可交付；`L1` = 自审降级可交付须声明；`L2` = 无审查，禁止交付。
 
 **只做一轮修复 wave + 一次 scoped 重审**。残余裁决向上汇报，不做第二轮。
 
@@ -50,12 +52,12 @@ bash "${ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/sdd/review-package
 ## verification 门函数（5 步，不可省）
 
 1. **识别**证明命令
-2. **完整运行**（不是抽样）
+2. **完整运行**（不是抽样）——命令输出不得用 `head`/`tail` 截断；需限量时先统计总数再取样
 3. **读输出与退出码**
 4. **核对**输出是否支持声明
 5. **才开口**
 
-禁止：没跑就说通过 / 只看汇报就认为完成 / 只跑部分说全部 / 拿历史结果当本次证据。
+禁止：没跑就说通过 / 只看汇报就认为完成 / 只跑部分说全部 / 拿历史结果当本次证据 / 从宿主临时输出（如 `.output`）读取结论——那是会被清理的中间态，结果只认回传消息与 P3 落盘文件。
 
 ## 退出条件（G6 + G7）
 

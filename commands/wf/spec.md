@@ -8,7 +8,7 @@ name: wf-spec
 ## 前置检查（不可跳）
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py" list      # 读 root；null 属正常返回，读 JSON 不重试
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" list      # 读 root；null 属正常返回，读 JSON 不重试
 ```
 
 | 情形 | 处理 |
@@ -22,7 +22,7 @@ python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scr
 ## 执行
 
 ```bash
-ENGINE="python ${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py"
+ENGINE="python ${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py"
 $ENGINE new-change "<kebab-case>"
 $ENGINE status --change "<name>"
 $ENGINE instructions <artifact-id> --change "<name>"
@@ -66,7 +66,7 @@ $ENGINE instructions <artifact-id> --change "<name>"
 ## 退出条件（G2）
 
 - [ ] 可达产物全 `done`/`skipped`
-- [ ] `python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py" validate --change <n>` 通过
+- [ ] `python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" validate --change <n>` 通过
 - [ ] 七项审查勾完
 - [ ] `artifactPaths.specs.existingOutputPaths` 已记录（**S8 的唯一 delta 来源**）
 - [ ] **老板已审阅产物**

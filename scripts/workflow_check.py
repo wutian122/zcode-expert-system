@@ -5,8 +5,9 @@
 
 设计原则：**纯 Markdown 检查表一定会被跳过，必须机械可验。**
 本脚本只做机器能判定的部分——文件存在性、计数对齐、占位符扫描、
-账本身份、状态-勾选一致性、delta 来源。语义质量（评审是否到位、
-根因是否真到位）不由脚本判定，交角色契约与主控。
+账本身份、状态-勾选一致性、delta 来源、派发证据（账本 `## Dispatches`
+与计划 `## Review` 的 implementer/reviewer 是否真的存在且不是同一个人）。
+语义质量（评审是否到位、根因是否真到位）不由脚本判定，交角色契约与主控。
 
 唯一声明源：config/workflow.json（阶段/门禁/产物/证据级）。
 本脚本不内嵌任何阶段常量，避免文档与实现漂移。
@@ -26,6 +27,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -274,6 +276,23 @@ def strip_code_fences(text):
     return re.sub(r"^[ \t]*```.*?^[ \t]*```[ \t]*$", "", text, flags=re.M | re.S)
 
 
+def _mask_code_fences(text):
+    """把围栏内容替换为空格（保留换行与长度），用于找段尾。
+
+    `section_body(keep_fences=True)` 要保留围栏里的填写内容，但找“下一个
+    同级标题”时不能被围栏里的示例标题截断。掩码后只保留围栏外的标题。
+    """
+    if not text:
+        return ""
+
+    def repl(m):
+        block = m.group(0)
+        return re.sub(r"[^\n]", " ", block)
+
+    return re.sub(r"^[ \t]*```.*?^[ \t]*```[ \t]*$", repl, text,
+                  flags=re.M | re.S)
+
+
 def has_section(text, name):
     """计划/账本里是否存在名为 name 的段（精确匹配，忽略围栏块内的示例）。"""
     return _section_re(name).search(strip_code_fences(text)) is not None
@@ -290,16 +309,21 @@ def section_body(text, name, keep_fences=False):
     ```markdown 围栏里（那是填写位）；若这里也剥掉，模板照抄的文档
     永远被判「段存在但无结论」，而它其实填得好好的。
     实测症状：本计划文档正确写了 spec/quality，却被判 soft:review_section_empty。
+
+    找段尾时必须用掩码后的文本：否则围栏内示例的 `## Review` 会把外层
+    真实段截断，模板形态的计划反而假红。
     """
     clean = text if keep_fences else strip_code_fences(text)
-    m = _section_re(name).search(clean)
+    scan = _mask_code_fences(clean) if keep_fences else clean
+    m = _section_re(name).search(scan)
     if not m:
         return None
     start = m.end()
-    level = len(re.match(r"#+", clean[m.start():]).group(0))
-    rest = clean[start:]
-    stop = re.search(r"^#{1,%d}[ \t]+\S" % level, rest, re.M)
-    return rest[:stop.start()] if stop else rest
+    level = len(re.match(r"#+", scan[m.start():]).group(0))
+    rest_scan = scan[start:]
+    stop = re.search(r"^#{1,%d}[ \t]+\S" % level, rest_scan, re.M)
+    end = stop.start() if stop else len(rest_scan)
+    return clean[start:start + end]
 
 
 def strip_quoted_markers(text):
@@ -349,6 +373,195 @@ def strip_quoted_markers(text):
             continue
         out.append(re.sub(r"`[^`]*`", "", line))   # 去掉行内代码引用
     return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# 派发证据（账本 `## Dispatches` + 计划 `## Review` 身份行）
+#
+# `templates/progress.md` 早就定义了派发行格式，`templates/plan-sections.md`
+# 也早就要求 `## Review` 写 implementer/reviewer——但本检查器从未解析它们。
+# 后果：主控可以在自己会话里实施、又自己审查，只要在账本写一句
+# `independence: L0` 就能拿完成态通过，证据链上没有任何机械拦截。
+# 本组解析器把「谁派给谁做什么」变成可核对证据，供 S5/S6 消费。
+#
+# 三条判定纪律：
+#   1. 模板示例写在 HTML 注释或代码围栏里 → 必须剥离，示例不是证据
+#   2. 专家名必须在 config/experts.json 注册表内，category 必须与注册表一致
+#   3. 缺必需字段的派发行仍要返回（malformed=True），不许静默丢行
+# ---------------------------------------------------------------------------
+
+DISPATCH_FIELDS = ("role", "agent", "category", "instance", "base",
+                   "brief", "report", "changeset")
+
+# 派发行必须带的最小字段集：缺任一即无法判定「谁、哪个域、什么角色」
+DISPATCH_REQUIRED_FIELDS = ("role", "agent", "category")
+
+# 「主控自己」的自称：L0（独立子代理审查）声明下这些值不算独立审查
+ORCHESTRATOR_LABELS = ("orchestrator", "主控", "main", "self", "controller")
+
+# 非注册表但仍属「独立子代理」的通用类型（宿主内置 general-purpose）
+GENERAL_PURPOSE_AGENTS = ("general-purpose", "general_purpose")
+
+
+def _strip_html_comments(text):
+    """剥掉 `<!-- ... -->`（含跨行）。
+
+    模板把示例派发行写在注释里；不剥会让「照抄模板的空账本」直接满足
+    派发证据门禁——那是假绿。只剥**已闭合**的注释：未闭合的 `<!--`
+    保持原样（宁可多判一条缺证据，也不静默吞掉后面的真实派发行）。
+    """
+    if not text:
+        return ""
+    return re.sub(r"<!--.*?-->", "", text, flags=re.S)
+
+
+_EXPERTS_CACHE = {}
+
+
+def _load_experts():
+    """`config/experts.json` 的 name -> category 映射（懒加载 + 缓存）。
+
+    只含注册表里的真实专家。**读不出时返回 None**——调用方据此判
+    `malformed:experts_unreadable`（查不了 ≠ 专家不存在），不把注册表损坏
+    印成「这个 agent 不是专家」，避免误导人去改名。合法但为空的注册表
+    返回 `{}`（此时任何 agent 都不在册，按缺专家判）。
+    """
+    if "map" in _EXPERTS_CACHE:
+        return _EXPERTS_CACHE["map"]
+    mapping = None
+    path = os.path.join(BASE_DIR, "config", "experts.json")
+    data = None
+    try:
+        with io.open(path, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = None
+    if data is not None:
+        items = []
+        if isinstance(data, dict):
+            items = data.get("experts") or []
+        elif isinstance(data, list):
+            items = data
+        mapping = {}
+        for entry in items:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "").strip()
+            if name:
+                mapping[name] = str(entry.get("category") or "").strip()
+    _EXPERTS_CACHE["map"] = mapping
+    return mapping
+
+
+def _workspace_ledger_missing(ctx):
+    """workspace 目录在、`progress.md` 却不在 → 账本被删（I3）。
+
+    交付后清理按铁律 11 删的是**整个** workspace；只剩目录而账本没了，
+    等于把「无派发记录」伪装成「已清理」，派发门禁必须 FAIL。
+    为避免「空目录残留」这类无证据场景误红，只有目录内确有实施产物
+    （`task-N-brief.md` / `task-N-report.md`）时才认定为证据缺失。
+    """
+    workspace = ctx.get("workspace")
+    if not workspace or not os.path.isdir(workspace):
+        return False
+    if os.path.isfile(os.path.join(workspace, "progress.md")):
+        return False
+    try:
+        files = os.listdir(workspace)
+    except OSError:
+        return False
+    return any(re.match(r"^task-[0-9]+-(?:brief|report)\.md$", f) for f in files)
+
+
+
+_DISPATCH_LINE_RE = re.compile(
+    r"^[ \t]*(?:[-*+][ \t]+)?dispatch[ \t]+(?P<task>\S+)(?P<rest>.*)$", re.I)
+_DISPATCH_FIELD_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9_-]*)[ \t]*=[ \t]*(?:\"([^\"]*)\"|'([^']*)'|(\S+))")
+
+
+def _parse_dispatches(text):
+    """解析账本 `## Dispatches` 段，返回结构化派发行列表。
+
+    单行格式（templates/progress.md）：
+      dispatch <task> role=<Role> agent="<专家名>" category=<域> instance=<N>
+               base=<标识> brief=<path> report=<path> changeset=<path>
+
+    返回 [{"task": "1", "role": "implementer", "agent": "软件架构师",
+           "category": "backend-architecture", "instance": "1", ...,
+           "raw": "<原始行>", "malformed": False}, ...]
+
+    - HTML 注释与代码围栏先剥掉：模板示例不是证据
+    - 段不存在 → 返回 []（「没写」与「写错」在这一层同形，区别由各检查项的
+      reason 表达）
+    - 缺必需字段 / 任务号位写成 `key=value` 的行仍返回，但 malformed=True
+    """
+    clean = strip_code_fences(_strip_html_comments(text))
+    body = section_body(clean, "Dispatches")
+    if body is None:
+        return []
+    rows = []
+    for line in body.splitlines():
+        m = _DISPATCH_LINE_RE.match(line)
+        if not m:
+            continue
+        task = m.group("task").strip().strip('"').strip("'")
+        row = {"task": task, "raw": line.strip(), "malformed": False}
+        for fm in _DISPATCH_FIELD_RE.finditer(m.group("rest")):
+            key = fm.group(1).lower()
+            if key not in DISPATCH_FIELDS:
+                continue
+            value = fm.group(2)
+            if value is None:
+                value = fm.group(3)
+            if value is None:
+                value = fm.group(4)
+            row[key] = (value or "").strip()
+        if row.get("role"):
+            # `ROLE=Implementer` 与 `role=implementer` 同义：role 值大小写笔误
+            # 不得变成「这一侧没派发」（M3，双错归因的源头）。
+            row["role"] = row["role"].lower()
+        if not task or "=" in task:
+            row["malformed"] = True
+        for key in DISPATCH_REQUIRED_FIELDS:
+            if not row.get(key):
+                row["malformed"] = True
+        rows.append(row)
+    return rows
+
+
+_REVIEW_IDENTITY_RE = re.compile(
+    r"^[ \t]*(?:[-*+][ \t]+)?(implementer|reviewer)[ \t]*[:：][ \t]*([^\n]*)$",
+    re.I | re.M)
+
+
+def _parse_review_identities(text):
+    """解析计划 `## Review` 段的 implementer / reviewer 身份行。
+
+    返回 {"implementer": <专家名|None>, "reviewer": <专家名|None>}。
+    占位符（`<专家名>`）、空值、`-` 一律算「没写」——模板照抄不是身份声明。
+    """
+    result = {"implementer": None, "reviewer": None}
+    if not text:
+        return result
+    body = section_body(_strip_html_comments(text), "Review", keep_fences=True)
+    if body is None:
+        return result
+    for m in _REVIEW_IDENTITY_RE.finditer(body):
+        key = m.group(1).lower()
+        value = (m.group(2) or "").strip().strip("`").strip()
+        if value.startswith("<") and value.endswith(">"):
+            continue
+        if value in ("", "-", "—"):
+            continue
+        if result.get(key) is None:
+            result[key] = value
+    return result
+
+
+def _task_sort_key(task_id):
+    """任务号排序键：纯数字按数值，其余按字符串（`任务分析` 这类非数字任务）。"""
+    return (0, int(task_id)) if task_id.isdigit() else (1, task_id)
 
 
 # ---------------------------------------------------------------------------
@@ -537,55 +750,145 @@ def check_S0(ctx, rep, wf):
                 id="S0.DOMAIN", reason="s0_domain_missing")
 
 
+def _mtime_day(path):
+    """文件 mtime 的本地日期；stat 失败返回 None。"""
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d")
+    except OSError:
+        return None
+
+
+def _git_tracked(root, rels):
+    """返回 rels 中已被 git 跟踪的集合；git 不可用/调用失败返回 None。
+
+    None 表示“无法确认”，调用方不得据此放行，只能退回更严的判据。
+    """
+    if not rels:
+        return set()
+    try:
+        res = subprocess.run(
+            ["git", "-C", root, "ls-files", "--"] + list(rels),
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0:
+        return None
+    return {
+        line.strip().replace("\\", "/")
+        for line in res.stdout.splitlines() if line.strip()
+    }
+
+
 def check_S1(ctx, rep, wf):
-    """S1：阶段一不落盘是设计，这里只查有没有违规落盘。"""
+    """S1：阶段一不落盘是设计，这里只查有没有违规落盘。
+
+    本次新增的判据不能只看文件名日期（未带日期的 design 文件会漏检），
+    也不能把违规降级成 WARN。新语义：
+
+    - 候选 = 文件名含 today OR mtime 日期 == today，再排除 git 已跟踪文件
+      （fresh clone / checkout 当天会把历史文件 mtime 刷成今天）。
+    - medium / large / 非法规模：命中候选即 FAIL（design.md 是唯一真相）。
+    - light / bug：首段含「非权威」才 OK；缺标注或读不出都 FAIL。
+    """
     label = gate_label(wf, "S1")
     specs_dir = os.path.join(ctx["root"], "docs", "superpowers", "specs")
     if not os.path.isdir(specs_dir):
         rep.add(label, "设计未违规落盘（R3）", OK, "docs/superpowers/specs/ 不存在",
                 id="S1.DESIGN_LEAK")
         return
-    # 「本次」的机械判据只能是日期。旧实现还匹配文件名含 "design"，
-    # 会把一年前的 old-redesign.md 判成本次违规（实测 WARN 误报）。
+
     files = [f for f in os.listdir(specs_dir) if f.endswith(".md")]
-    stale = [f for f in files if ctx["today"] in f]
-    if not stale:
+    candidates = []
+    for f in files:
+        full = os.path.join(specs_dir, f)
+        if ctx["today"] in f or _mtime_day(full) == ctx["today"]:
+            candidates.append(f)
+
+    tracked_note = ""
+    if candidates:
+        rels = [
+            os.path.relpath(os.path.join(specs_dir, f), ctx["root"]).replace("\\", "/")
+            for f in candidates
+        ]
+        tracked = _git_tracked(ctx["root"], rels) if ctx.get("git") else set()
+        if tracked is None:
+            tracked_note = "；未能确认 git 跟踪状态，按未跟踪从严判定"
+        else:
+            candidates = [
+                f for f, rel in zip(candidates, rels) if rel not in tracked
+            ]
+
+    if not candidates:
         rep.add(label, "设计未违规落盘（R3）", OK, "无本次设计文件",
                 id="S1.DESIGN_LEAK")
         return
-    bad = []
-    for f in stale:
+
+    strict = (
+        not ctx.get("scale_valid", True)
+        or ctx.get("scale_key") in ("medium", "large")
+    )
+    if strict:
+        rep.add(
+            label, "设计未违规落盘（R3）", FAIL,
+            "[design_not_allowed] %s 规模下 S1 不得落盘，发现本次设计文件：%s%s"
+            % (ctx.get("scale") or "未知", ", ".join(candidates[:3]), tracked_note),
+            id="S1.DESIGN_LEAK", reason="design_not_allowed",
+        )
+        return
+
+    unreadable = []
+    unmarked = []
+    for f in candidates:
         head = read(os.path.join(specs_dir, f))
-        if head is None or "非权威" not in head[:200]:
-            # 三态：不可读 ≠ 未标注。不可读文件显式标注，防「读不出」
-            # 被压成「查过且未标注」（A-9）。
-            bad.append(f if head is not None else f + "（不可读）")
-    if bad:
-        rep.add(label, "设计未违规落盘（R3）", WARN,
-                "[soft:design_not_marked] 存在未标注『非权威』的设计文件：%s"
-                % ", ".join(bad[:3]),
-                id="S1.DESIGN_LEAK", reason="soft:design_not_marked")
+        if head is None:
+            unreadable.append(f)
+        elif "非权威" not in head[:200]:
+            unmarked.append(f)
+
+    if unreadable:
+        rep.add(
+            label, "设计未违规落盘（R3）", FAIL,
+            "[unverifiable:spec_unreadable] 无法读取候选设计文件：%s%s"
+            % (", ".join(unreadable[:3]), tracked_note),
+            id="S1.DESIGN_LEAK", reason="unverifiable:spec_unreadable",
+        )
+    elif unmarked:
+        rep.add(
+            label, "设计未违规落盘（R3）", FAIL,
+            "[design_not_marked] 存在未标注『非权威』的设计文件：%s%s"
+            % (", ".join(unmarked[:3]), tracked_note),
+            id="S1.DESIGN_LEAK", reason="design_not_marked",
+        )
     else:
         rep.add(label, "设计未违规落盘（R3）", OK, "已标注非权威",
                 id="S1.DESIGN_LEAK")
 
 
+def _archived_change_path(root, change):
+    """返回 archive/YYYY-MM-DD-<change>/ 的绝对路径，找不到返回 None。"""
+    if not change:
+        return None
+    arch = os.path.join(root, "openspec", "changes", "archive")
+    if not os.path.isdir(arch):
+        return None
+    pat = re.compile(r"^\d{4}-\d{2}-\d{2}-%s$" % re.escape(change))
+    for name in sorted(os.listdir(arch)):
+        p = os.path.join(arch, name)
+        if pat.match(name) and os.path.isdir(p):
+            return p
+    return None
+
+
 def _archived_entry(ctx):
-    """在 openspec/changes/archive/ 下找「日期前缀 + 精确变更名」的目录。
+    """在 openspec/changes/archive/ 下找「日期前缀 + 精确变更名」的目录名。
 
     精确匹配，不用子串：旧实现 `ctx["change"] in e` 会让 `my-change`
     命中 `archive/2026-01-01-my-change-v2/`。
     """
-    if not ctx.get("change"):
-        return None
-    arch = os.path.join(ctx["root"], "openspec", "changes", "archive")
-    if not os.path.isdir(arch):
-        return None
-    pat = re.compile(r"^\d{4}-\d{2}-\d{2}-%s$" % re.escape(ctx["change"]))
-    for name in sorted(os.listdir(arch)):
-        if pat.match(name) and os.path.isdir(os.path.join(arch, name)):
-            return name
-    return None
+    p = _archived_change_path(ctx["root"], ctx.get("change"))
+    return os.path.basename(p) if p else None
 
 
 def check_S2(ctx, rep, wf):
@@ -657,7 +960,14 @@ def check_S2(ctx, rep, wf):
         name = os.path.basename(art["path"].rstrip("/"))
         required = art.get("required", False)
         if art.get("glob"):
-            found = expand_artifact(ctx["root"], art["path"], ctx["change"])
+            pattern = art["path"]
+            base = ctx["root"]
+            if ctx.get("change_dir_archived"):
+                prefix = "openspec/changes/<change>/"
+                if pattern.startswith(prefix):
+                    base = ctx["change_dir"]
+                    pattern = pattern[len(prefix):]
+            found = expand_artifact(base, pattern, ctx["change"])
             if found:
                 rep.add(label, "%s（glob）" % name, OK, "%d 个匹配" % len(found),
                         id="S2.ARTIFACT:%s" % name)
@@ -773,6 +1083,12 @@ def _tasks_done_ids(tasks_text):
     return ids, n_done, n_no_id
 
 
+BUG_EVIDENCE_TOKENS = (
+    "入口分诊", "根因", "假设", "方案", "副作用",
+    "双确认", "RED", "red-green", "全量回归",
+)
+
+
 def check_S3(ctx, rep, wf):
     """计划文档：存在 + 必备段 + 任务标题 + 占位符 + 与 tasks.md 对齐。"""
     label = gate_label(wf, "S3")
@@ -792,7 +1108,12 @@ def check_S3(ctx, rep, wf):
     rep.add(label, "计划文档存在", OK, ctx["plan"], id="S3.PLAN")
 
     # 必备段：精确匹配（前缀匹配会让 `## Specification` 冒充 `## Spec`）
-    for sec in stage["required_sections"]:
+    # Bug 规模额外要求 ## Bug Investigation：Bug 专项的关键证据必须落 P3，
+    # 不能只留在会话或 P4 workspace。
+    sections = list(stage["required_sections"])
+    if ctx.get("scale_key") == "bug":
+        sections.append("Bug Investigation")
+    for sec in sections:
         if not light_wants(ctx, "S3", "sections"):
             continue  # 「简」模式不查段名——它只证明有人写了标题，不证明内容
         has = has_section(text, sec)
@@ -803,6 +1124,21 @@ def check_S3(ctx, rep, wf):
                     "[missing:section] 缺 `## %s` 段（精确段名，`## %sXxx` 不算）"
                     % (sec, sec),
                     id="S3.SECTION:%s" % sec, reason="missing:section")
+
+    # Bug P3 证据内容：只查段存在不够，关键证据词必须在段内出现。
+    if (ctx.get("scale_key") == "bug"
+            and has_section(text, "Bug Investigation")):
+        body = section_body(text, "Bug Investigation", keep_fences=True) or ""
+        missing = [t for t in BUG_EVIDENCE_TOKENS if t not in body]
+        if missing:
+            rep.add(label, "Bug 关键证据已落 P3", FAIL,
+                    "[missing:bug_evidence] `## Bug Investigation` 缺关键证据：%s"
+                    % ", ".join(missing),
+                    id="S3.BUG_EVIDENCE", reason="missing:bug_evidence")
+        else:
+            rep.add(label, "Bug 关键证据已落 P3", OK,
+                    "入口/根因/假设/方案/双确认/RED/red-green/全量回归 已记录",
+                    id="S3.BUG_EVIDENCE")
 
     # 任务标题：无论「必」还是「简」都必须查——task-brief 脚本按它解析
     tasks = re.findall(r"^#+\s+Task\s+(\d+)\s*:", text, re.M)
@@ -919,6 +1255,168 @@ def check_S4(ctx, rep, wf):
                 id="S4.LEDGER_ID", reason="malformed:ledger_identity")
 
 
+def _check_s5_dispatches(ctx, rep, label):
+    """S5 派发证据：完成任务的 implementer 派发行 / 专家真实性 / 孤儿 report。
+
+    适用范围（判定矩阵）：只对**账本完成集**执法。无 workspace、无账本、
+    完成集为空一律 `inapplicable:` SKIP——交付后清理与未开工都不是缺陷。
+    light 只降 `general-purpose` 一项为 soft WARN，implementer 缺失仍 FAIL。
+    """
+    ids = (("S5.DISPATCH_IMPLEMENTER", "实施者派发证据"),
+           ("S5.DISPATCH_ORPHAN_REPORT", "report 与派发行一一对应"),
+           ("S5.IMPLEMENTER_IS_EXPERT", "实施者是注册表内专家"))
+
+    def skip_all(reason, detail):
+        for cid, name in ids:
+            rep.add(label, name, SKIP, "[%s] %s" % (reason, detail),
+                    id=cid, reason=reason)
+
+    if not ctx.get("workspace") or not os.path.isdir(ctx["workspace"]):
+        skip_all("inapplicable:no_workspace",
+                 "workspace 不存在或已删（可能已按铁律 11 清理），派发证据无从核对")
+        return
+    if _workspace_ledger_missing(ctx):
+        # workspace 在、brief/report 在、账本不在：删账本不是清理（I3）。
+        # 一条 FAIL 说清，其余两项记 blocked，不让检查项凭空消失（M2 同族）。
+        rep.add(label, "实施者派发证据", FAIL,
+                "[missing:ledger] workspace 存在且已有 brief/report，但 "
+                "progress.md 缺失——删掉账本不等于没派发，完成态证据必须可核",
+                id="S5.DISPATCH_IMPLEMENTER", reason="missing:ledger")
+        for cid, name in ids[1:]:
+            rep.add(label, name, SKIP,
+                    "[inapplicable:ledger_evidence] 账本缺失"
+                    "（已由 S5.DISPATCH_IMPLEMENTER 判 FAIL），本项无从核对",
+                    id=cid, reason="inapplicable:ledger_evidence")
+        return
+    if not ctx["ledger"]:
+        skip_all("inapplicable:no_ledger", "无账本，无派发记录可核")
+        return
+    ltext = read(ctx["ledger"])
+    if ltext is None:
+        # 账本存在但读不出：整类证据「查不了」→ FAIL（fail-closed）。
+        # 与 check_S6 的 S6.INDEPENDENCE 早退同构：一条 FAIL 说清，不造三条噪音。
+        rep.add(label, "实施者派发证据", FAIL,
+                "[malformed:ledger_unreadable] 账本存在但读不出，派发证据无从核对",
+                id="S5.DISPATCH_IMPLEMENTER", reason="malformed:ledger_unreadable")
+        return
+
+    completed = _ledger_completed_ids(ltext)
+    if not completed:
+        skip_all("inapplicable:no_completed_task",
+                 "账本无完成行（无 `Task N: complete`），无完成态需要派发证据")
+        return
+
+    rows = _parse_dispatches(ltext)
+    impl_rows = [r for r in rows if r.get("role") == "implementer"]
+    impl_tasks = set(r["task"] for r in impl_rows)
+
+    # --- S5.DISPATCH_IMPLEMENTER ---
+    malformed = [r for r in rows if r.get("malformed")]
+    missing = sorted((t for t in completed if t not in impl_tasks),
+                     key=_task_sort_key)
+    if malformed:
+        rep.add(label, "实施者派发证据", FAIL,
+                "[malformed:dispatch_line] 派发行缺必需字段（role/agent/category）"
+                "或任务号位非法：%s"
+                % "; ".join(r["raw"][:70] for r in malformed[:3]),
+                id="S5.DISPATCH_IMPLEMENTER", reason="malformed:dispatch_line")
+    elif missing:
+        rep.add(label, "实施者派发证据", FAIL,
+                "[missing:implementer_dispatch] 完成的任务 %s 没有 implementer "
+                "派发行——没有派发就没有实施者，「主控自己改码」不得判完成"
+                % ",".join(missing),
+                id="S5.DISPATCH_IMPLEMENTER", reason="missing:implementer_dispatch")
+    else:
+        rep.add(label, "实施者派发证据", OK,
+                "%d 条 implementer 派发行覆盖完成任务 %s"
+                % (len(impl_rows), ",".join(sorted(completed, key=_task_sort_key))),
+                id="S5.DISPATCH_IMPLEMENTER")
+
+    # --- S5.DISPATCH_ORPHAN_REPORT ---
+    # 两个方向都查：report 存在但没人派发（孤儿）；派发行的 report 指向别的
+    # 任务（张冠李戴，同一份 report 不会被两个任务共用）。
+    report_files, orphans = [], []
+    for fname in sorted(os.listdir(ctx["workspace"])):
+        m = re.match(r"^task-([0-9]+)-report\.md$", fname)
+        if not m:
+            continue
+        report_files.append(fname)
+        if m.group(1) not in impl_tasks:
+            orphans.append(fname)
+    mismatched = []
+    for r in impl_rows:
+        m = re.search(r"task-([0-9]+)-report\.md$", r.get("report") or "")
+        if m and m.group(1) != r["task"]:
+            mismatched.append("%s→%s" % (r["task"], r.get("report")))
+    if mismatched:
+        rep.add(label, "report 与派发行一一对应", FAIL,
+                "[malformed:report_mismatch] 派发行的 report 指向别的任务：%s"
+                % ", ".join(mismatched[:3]),
+                id="S5.DISPATCH_ORPHAN_REPORT", reason="malformed:report_mismatch")
+    elif orphans:
+        rep.add(label, "report 与派发行一一对应", FAIL,
+                "[missing:dispatch_for_report] 有 report 却没有对应任务的 implementer "
+                "派发行：%s——report 来源不明" % ", ".join(orphans[:3]),
+                id="S5.DISPATCH_ORPHAN_REPORT", reason="missing:dispatch_for_report")
+    else:
+        rep.add(label, "report 与派发行一一对应", OK,
+                "%d 份 task-N-report.md 均有 implementer 派发行" % len(report_files),
+                id="S5.DISPATCH_ORPHAN_REPORT")
+
+    # --- S5.IMPLEMENTER_IS_EXPERT ---
+    if not impl_rows:
+        # 没有 implementer 派发行时「是不是注册表专家」无从判定；缺派发本身
+        # 已由 S5.DISPATCH_IMPLEMENTER 判 FAIL（rc 已非零），这里不重复判红。
+        rep.add(label, "实施者是注册表内专家", SKIP,
+                "[inapplicable:no_implementer_dispatch] 无 implementer 派发行，"
+                "专家真实性无从核对（缺派发已由 S5.DISPATCH_IMPLEMENTER 判 FAIL）",
+                id="S5.IMPLEMENTER_IS_EXPERT",
+                reason="inapplicable:no_implementer_dispatch")
+        return
+
+    experts = _load_experts()
+    if experts is None:
+        # 注册表读不出 ≠ 专家不存在（M4）：查不了是 malformed，不是 missing。
+        rep.add(label, "实施者是注册表内专家", FAIL,
+                "[malformed:experts_unreadable] config/experts.json 读不出，"
+                "专家真实性无从核对",
+                id="S5.IMPLEMENTER_IS_EXPERT", reason="malformed:experts_unreadable")
+        return
+    hard, soft = [], []
+    for r in impl_rows:
+        agent = (r.get("agent") or "").strip()
+        category = (r.get("category") or "").strip()
+        if agent.lower() in ORCHESTRATOR_LABELS:
+            hard.append("「%s」是主控自称，不是可派发的专家" % agent)
+        elif agent in experts:
+            registered = experts[agent]
+            if category and registered and category != registered:
+                hard.append("%s 的 category=%s 与注册表 %s 不一致"
+                            % (agent, category, registered))
+        elif agent.lower() in GENERAL_PURPOSE_AGENTS:
+            if ctx.get("scale_key") == "light":
+                soft.append("%s 未绑定域专家（light 允许，建议改派域专家）" % agent)
+            else:
+                hard.append("%s 不是注册表专家（仅 light 允许降级）" % agent)
+        else:
+            hard.append("%s 不在 config/experts.json 注册表内" % agent)
+
+    if hard:
+        rep.add(label, "实施者是注册表内专家", FAIL,
+                "[missing:implementer_expert] %s" % "；".join(hard[:3]),
+                id="S5.IMPLEMENTER_IS_EXPERT", reason="missing:implementer_expert")
+    elif soft:
+        rep.add(label, "实施者是注册表内专家", WARN,
+                "[soft:implementer_general_purpose] %s" % "；".join(soft[:3]),
+                id="S5.IMPLEMENTER_IS_EXPERT",
+                reason="soft:implementer_general_purpose")
+    else:
+        rep.add(label, "实施者是注册表内专家", OK,
+                "%d 条 implementer 派发行的 agent/category 与注册表一致"
+                % len(impl_rows),
+                id="S5.IMPLEMENTER_IS_EXPERT")
+
+
 def check_S5(ctx, rep, wf):
     """每任务产物 + 三元对齐。
 
@@ -947,6 +1445,9 @@ def check_S5(ctx, rep, wf):
             rep.add(label, "任务产物", SKIP,
                     "[inapplicable:no_workspace] 无 SDD workspace（可能已按铁律 11 清理）",
                     id="S5.WORKSPACE", reason="inapplicable:no_workspace")
+        # 派发证据同样按 inapplicable SKIP（交付后清理是正常终态，不得误红），
+        # 但要显式出项——「该查的项凭空消失」与「查过且干净」不是一回事。
+        _check_s5_dispatches(ctx, rep, label)
         return
 
     files = os.listdir(ctx["workspace"]) if os.path.isdir(ctx["workspace"]) else []
@@ -1020,6 +1521,332 @@ def check_S5(ctx, rep, wf):
                         FAIL, "[malformed:triad] %s（basis=%s）" % (detail, basis),
                         id="S5.TRIAD", reason="malformed:triad")
 
+    # 派发证据（G5）：完成态必须有 implementer 派发行，专家名必须真实
+    _check_s5_dispatches(ctx, rep, label)
+
+
+def _check_review_identities(ctx, rep, label, ptext, rows):
+    """计划 `## Review` 的 implementer / reviewer 身份行（S6.REVIEW_IDENTITIES）。
+
+    只依赖计划文档：账本缺席（`rows is None`）时仍要查，不随账本类检查一起
+    蒸发（M1）。身份齐备且有派发行时，与账本 `## Dispatches` 对照（I2）——
+    只查「计划写没写」等于不查，写反了照样绿。
+    """
+    cid = "S6.REVIEW_IDENTITIES"
+    name = "审查身份已声明（implementer / reviewer）"
+    if ptext is None:
+        rep.add(label, name, SKIP,
+                "[inapplicable:no_plan] 无计划文档，`## Review` 身份行无从核对",
+                id=cid, reason="inapplicable:no_plan")
+        return
+    identities = _parse_review_identities(ptext)
+    missing_keys = [k for k in ("implementer", "reviewer")
+                    if not identities.get(k)]
+    if missing_keys:
+        if ctx.get("scale_key") == "light":
+            rep.add(label, name, WARN,
+                    "[soft:missing_review_identities] 计划 `## Review` 缺 %s 行"
+                    "（light 允许，medium/large/bug 必须写）"
+                    % "/".join("%s:" % k for k in missing_keys),
+                    id=cid, reason="soft:missing_review_identities")
+        else:
+            rep.add(label, name, FAIL,
+                    "[missing:review_identities] 计划 `## Review` 缺 %s 行——"
+                    "身份不落纸就无法核对「谁实施、谁审查」"
+                    % "/".join("%s:" % k for k in missing_keys),
+                    id=cid, reason="missing:review_identities")
+        return
+
+    def agents_of(role):
+        seen = []
+        for r in (rows or []):
+            if r.get("role") != role:
+                continue
+            agent = (r.get("agent") or "").strip()
+            if agent and agent not in seen:
+                seen.append(agent)
+        return seen
+
+    mismatched = []
+    if rows is not None:
+        impl_agents, rev_agents = agents_of("implementer"), agents_of("reviewer")
+        # 只在账本该侧**确有**派发行时对照：该侧零派发已由 S5/S6 对应项判 FAIL；
+        # 而 L1（主控自审）本就不要求 reviewer 派发，不能让身份对照变相强制它
+        # 伪造一条（I1 的语义不能被 I2 绕回来取消）。
+        if impl_agents and identities["implementer"] not in impl_agents:
+            mismatched.append("计划 implementer=%s 不在 role=implementer 派发行（%s）中"
+                              % (identities["implementer"], ",".join(impl_agents)))
+        if rev_agents and identities["reviewer"] not in rev_agents:
+            mismatched.append("计划 reviewer=%s 不在 role=reviewer 派发行（%s）中"
+                              % (identities["reviewer"], ",".join(rev_agents)))
+    if mismatched:
+        rep.add(label, name, FAIL,
+                "[malformed:identity_mismatch] %s——计划与账本对不上，"
+                "「谁实施、谁审查」无从确认" % "；".join(mismatched),
+                id=cid, reason="malformed:identity_mismatch")
+        return
+    rep.add(label, name, OK,
+            "implementer=%s / reviewer=%s"
+            % (identities["implementer"], identities["reviewer"]),
+            id=cid)
+
+
+def _check_s6_dispatches(ctx, rep, label, ltext, ptext, worst):
+    """S6 派发证据：reviewer 派发行 / 与实施者不同人 / L0 必须有独立派发 / 身份行。
+
+    三个账本类检查按证据三态分流：workspace 整删（交付后清理）与未开工 → SKIP；
+    workspace 在而 `progress.md` 被删、且已有 brief/report → FAIL missing:ledger
+    （删账本不是清理）。身份行只依赖计划文档，**不随账本缺席蒸发**——
+    四项检查永远各出一项。
+    """
+    ledger_ids = (("S6.REVIEWER_DISPATCH", "审查者派发证据（G6）"),
+                  ("S6.REVIEWER_DIFFERENT_EXPERT", "审查者与实施者非同人"),
+                  ("S6.L0_REQUIRES_DISPATCH", "L0 必须有独立审查派发"))
+
+    # 账本类证据统一结论：gate 非 None 时三项全按此结论出项。
+    gate = None   # (status, reason, detail)
+    if not ctx.get("workspace") or not os.path.isdir(ctx["workspace"]):
+        gate = (SKIP, "inapplicable:no_workspace",
+                "workspace 不存在或已删（可能已按铁律 11 清理），派发证据无从核对")
+    elif _workspace_ledger_missing(ctx):
+        # 本 workspace 的账本被删（brief/report 还在）：不许拿别的 workspace
+        # 的账本顶替，也不许当成「已清理」——直接判证据缺失（I3）。
+        gate = (FAIL, "missing:ledger",
+                "workspace 存在且已有 brief/report，但 progress.md 缺失——"
+                "删掉账本不等于没派发，完成态证据必须可核")
+    elif not ctx["ledger"]:
+        gate = (SKIP, "inapplicable:no_ledger", "无账本，无派发记录可核")
+    elif ltext is None:
+        gate = (FAIL, "malformed:ledger_unreadable",
+                "账本存在但读不出，审查派发证据无从核对")
+    elif not _ledger_completed_ids(ltext):
+        gate = (SKIP, "inapplicable:no_completed_task",
+                "账本无完成行（无 `Task N: complete`），无完成态需要审查派发证据")
+
+    if gate is not None:
+        status, reason, detail = gate
+        for cid, name in ledger_ids:
+            if status == FAIL and cid == "S6.REVIEWER_DISPATCH":
+                rep.add(label, name, FAIL, "[%s] %s" % (reason, detail),
+                        id=cid, reason=reason)
+            elif status == FAIL:
+                rep.add(label, name, SKIP,
+                        "[inapplicable:ledger_evidence] 账本证据不可用"
+                        "（已由 S6.REVIEWER_DISPATCH 判 FAIL），本项无从核对",
+                        id=cid, reason="inapplicable:ledger_evidence")
+            else:
+                rep.add(label, name, SKIP, "[%s] %s" % (reason, detail),
+                        id=cid, reason=reason)
+        _check_review_identities(ctx, rep, label, ptext, None)
+        return
+
+    rows = _parse_dispatches(ltext)
+    rev_rows = [r for r in rows if r.get("role") == "reviewer"]
+    impl_rows = [r for r in rows if r.get("role") == "implementer"]
+
+    # --- S6.REVIEWER_DISPATCH ---
+    # 只有真的声明 L0 才要求 reviewer 派发行（I1）：L1 声称的是「主控自审」，
+    # 本来就没有独立子代理可派，逼它伪造一条 reviewer 行才是错的门禁。
+    if worst is None:
+        rep.add(label, "审查者派发证据（G6）", SKIP,
+                "[inapplicable:no_independence] 独立性标记缺失，是否声称独立审查"
+                "无从判定（已由 S6.INDEPENDENCE 判 FAIL）",
+                id="S6.REVIEWER_DISPATCH", reason="inapplicable:no_independence")
+    elif worst != "L0":
+        rep.add(label, "审查者派发证据（G6）", SKIP,
+                "[inapplicable:not_l0] 声明级别 %s，未声称独立子代理审查"
+                "（L1 降级的留痕由 S6.RULINGS 核）" % worst,
+                id="S6.REVIEWER_DISPATCH", reason="inapplicable:not_l0")
+    elif rev_rows:
+        rep.add(label, "审查者派发证据（G6）", OK,
+                "%d 条 reviewer 派发行" % len(rev_rows), id="S6.REVIEWER_DISPATCH")
+    else:
+        rep.add(label, "审查者派发证据（G6）", FAIL,
+                "[missing:reviewer_dispatch] `independence: L0` 却有完成任务 %s，"
+                "没有任何 reviewer 派发行——完成态缺审查派发证据"
+                % ",".join(sorted(_ledger_completed_ids(ltext), key=_task_sort_key)),
+                id="S6.REVIEWER_DISPATCH", reason="missing:reviewer_dispatch")
+
+    # --- S6.REVIEWER_DIFFERENT_EXPERT ---
+    # 判据是**身份**（同名＝同一席专家，I1：subagent_type 不得与实施者相同）。
+    # 先做 reviewer 行的注册表反查（I4）：agent 必须真实存在、category 必须与
+    # 注册表一致——否则「改一个 category」就能把自审说成异域审查。
+    rev_cat = {}
+    for r in rev_rows:
+        agent = (r.get("agent") or "").strip()
+        if agent:
+            rev_cat.setdefault(agent, (r.get("category") or "").strip())
+    impl_cat = {}
+    for r in impl_rows:
+        agent = (r.get("agent") or "").strip()
+        if agent:
+            impl_cat.setdefault(agent, (r.get("category") or "").strip())
+
+    experts = _load_experts()
+    registered_same = sorted(set(rev_cat) & set(impl_cat) & set(experts or ()))
+    reviewer_unknown, reviewer_mismatch, reviewer_general_soft = [], [], []
+    for agent, category in sorted(rev_cat.items()):
+        if agent.lower() in ORCHESTRATOR_LABELS:
+            reviewer_unknown.append("「%s」是主控自称，不是可派发的专家" % agent)
+        elif experts and agent in experts:
+            registered = experts[agent]
+            if category and registered and category != registered:
+                reviewer_mismatch.append("%s 的 category=%s 与注册表 %s 不一致"
+                                         % (agent, category, registered))
+        elif agent.lower() in GENERAL_PURPOSE_AGENTS:
+            if ctx.get("scale_key") == "light":
+                reviewer_general_soft.append(
+                    "%s 未绑定域专家（light 允许，建议改派域专家）" % agent)
+            else:
+                reviewer_unknown.append(
+                    "%s 不是注册表专家（仅 light 允许降级）" % agent)
+        elif experts is None:
+            # 注册表读不出：不是「不在册」，是查不了（M4 同族）。
+            reviewer_unknown.append("%s 的注册表资格无从核对（experts 读不出）" % agent)
+        else:
+            reviewer_unknown.append("%s 不在 config/experts.json 注册表内" % agent)
+
+    if not rev_cat:
+        rep.add(label, "审查者与实施者非同人", SKIP,
+                "[inapplicable:missing_reviewer_dispatch] 没有任何 reviewer 派发行，"
+                "同人判据无从核对（缺派发已由对应检查项判 FAIL）",
+                id="S6.REVIEWER_DIFFERENT_EXPERT",
+                reason="inapplicable:missing_reviewer_dispatch")
+    elif registered_same:
+        # 注册表专家名→域是 1:1，自述 category 改不动事实（C1）：
+        # 同名即同一席专家自审，无视自述 category 一律 FAIL。
+        rep.add(label, "审查者与实施者非同人", FAIL,
+                "[forbidden:reviewer_same_as_implementer] reviewer 与 implementer "
+                "是同一位注册表专家：%s——自己审查自己，独立性不成立"
+                % ", ".join(registered_same[:3]),
+                id="S6.REVIEWER_DIFFERENT_EXPERT",
+                reason="forbidden:reviewer_same_as_implementer")
+    elif experts is None:
+        rep.add(label, "审查者与实施者非同人", FAIL,
+                "[malformed:experts_unreadable] config/experts.json 读不出，"
+                "reviewer 行无从反查（agent 真实性 / category 一致性都查不了）",
+                id="S6.REVIEWER_DIFFERENT_EXPERT",
+                reason="malformed:experts_unreadable")
+    elif reviewer_unknown:
+        rep.add(label, "审查者与实施者非同人", FAIL,
+                "[missing:reviewer_expert] reviewer 行不是可派发的注册表专家：%s"
+                % "；".join(reviewer_unknown[:3]),
+                id="S6.REVIEWER_DIFFERENT_EXPERT", reason="missing:reviewer_expert")
+    elif reviewer_mismatch:
+        rep.add(label, "审查者与实施者非同人", FAIL,
+                "[malformed:reviewer_category_mismatch] %s——自述 category 改不动"
+                "注册表事实，按注册表判定" % "；".join(reviewer_mismatch[:3]),
+                id="S6.REVIEWER_DIFFERENT_EXPERT",
+                reason="malformed:reviewer_category_mismatch")
+    elif not impl_cat:
+        rep.add(label, "审查者与实施者非同人", SKIP,
+                "[inapplicable:missing_implementer_dispatch] 没有 implementer "
+                "派发行，同人判据无从核对（缺派发已由对应检查项判 FAIL）",
+                id="S6.REVIEWER_DIFFERENT_EXPERT",
+                reason="inapplicable:missing_implementer_dispatch")
+    elif reviewer_general_soft:
+        rep.add(label, "审查者与实施者非同人", WARN,
+                "[soft:reviewer_general_purpose] %s"
+                % "；".join(reviewer_general_soft[:3]),
+                id="S6.REVIEWER_DIFFERENT_EXPERT",
+                reason="soft:reviewer_general_purpose")
+    else:
+        # 判据是**身份**（注册表专家同名已在上面拦掉）：
+        #   同名 + 非注册表 agent + 明确不同域 → 允许但 WARN
+        #   同名 + 同域（或任一域缺失，无法证明不同）→ FAIL
+        #   异名 + 同域 → 允许但 WARN soft:same_domain_review（异域审查更优）
+        same_name_hard, same_name_soft = [], []
+        for agent in sorted(rev_cat):
+            if agent not in impl_cat:
+                continue
+            if agent.lower() in GENERAL_PURPOSE_AGENTS:
+                # 非注册表 agent 没有可信的 category 背书，无法证明“不同域”。
+                same_name_hard.append(agent)
+                continue
+            reviewer_category, impler_category = rev_cat[agent], impl_cat[agent]
+            if reviewer_category and impler_category \
+                    and reviewer_category != impler_category:
+                same_name_soft.append("%s（%s vs %s）"
+                                      % (agent, impler_category, reviewer_category))
+            else:
+                same_name_hard.append(agent)
+        same_domain = []
+        for reviewer_agent, reviewer_category in sorted(rev_cat.items()):
+            if reviewer_agent in impl_cat or not reviewer_category:
+                continue
+            for impler_agent, impler_category in sorted(impl_cat.items()):
+                if reviewer_category == impler_category:
+                    same_domain.append("%s↔%s（%s）" % (reviewer_agent, impler_agent,
+                                                      reviewer_category))
+        if same_name_hard:
+            rep.add(label, "审查者与实施者非同人", FAIL,
+                    "[forbidden:reviewer_same_as_implementer] reviewer 与 implementer "
+                    "是同一位专家：%s——自己审查自己，独立性不成立"
+                    % ", ".join(same_name_hard[:3]),
+                    id="S6.REVIEWER_DIFFERENT_EXPERT",
+                    reason="forbidden:reviewer_same_as_implementer")
+        elif same_name_soft or same_domain:
+            rep.add(label, "审查者与实施者非同人", WARN,
+                    "[soft:same_domain_review] 审查与实施的席位同域或同名跨域，"
+                    "建议改派异域专家：%s"
+                    % ", ".join((same_name_soft + same_domain)[:3]),
+                    id="S6.REVIEWER_DIFFERENT_EXPERT",
+                    reason="soft:same_domain_review")
+        else:
+            rep.add(label, "审查者与实施者非同人", OK,
+                    "reviewer=%s / implementer=%s"
+                    % (",".join(sorted(rev_cat)), ",".join(sorted(impl_cat))),
+                    id="S6.REVIEWER_DIFFERENT_EXPERT")
+
+    # --- S6.L0_REQUIRES_DISPATCH ---
+    if worst is None:
+        rep.add(label, "L0 必须有独立审查派发", SKIP,
+                "[inapplicable:no_independence] 独立性标记缺失，L0 声明无从判定"
+                "（已由 S6.INDEPENDENCE 判 FAIL）",
+                id="S6.L0_REQUIRES_DISPATCH", reason="inapplicable:no_independence")
+    elif worst != "L0":
+        rep.add(label, "L0 必须有独立审查派发", SKIP,
+                "[inapplicable:not_l0] 声明级别 %s，未声称独立子代理审查" % worst,
+                id="S6.L0_REQUIRES_DISPATCH", reason="inapplicable:not_l0")
+    elif not rev_rows:
+        rep.add(label, "L0 必须有独立审查派发", FAIL,
+                "[missing:reviewer_dispatch] `independence: L0` 却没有任何 reviewer "
+                "派发行——L0（独立子代理审查）声明不成立",
+                id="S6.L0_REQUIRES_DISPATCH", reason="missing:reviewer_dispatch")
+    else:
+        independent = []
+        for r in rev_rows:
+            agent = (r.get("agent") or "").strip()
+            if agent and agent.lower() not in ORCHESTRATOR_LABELS:
+                independent.append(agent)
+        if not independent:
+            rep.add(label, "L0 必须有独立审查派发", FAIL,
+                    "[forbidden:l0_self_review] reviewer 派发行的 agent 是主控自称"
+                    "（%s）——主控自己审查不得标 L0"
+                    % ",".join(sorted({(r.get("agent") or "").strip()
+                                       for r in rev_rows})[:3]),
+                    id="S6.L0_REQUIRES_DISPATCH", reason="forbidden:l0_self_review")
+        elif experts is None:
+            rep.add(label, "L0 必须有独立审查派发", FAIL,
+                    "[malformed:experts_unreadable] config/experts.json 读不出，"
+                    "L0 的 reviewer 资格无从核对",
+                    id="S6.L0_REQUIRES_DISPATCH", reason="malformed:experts_unreadable")
+        else:
+            unknown = [a for a in independent
+                       if a not in experts]
+            if unknown:
+                rep.add(label, "L0 必须有独立审查派发", FAIL,
+                        "[missing:reviewer_expert] L0 的 reviewer 不在 "
+                        "config/experts.json 注册表内：%s" % ", ".join(sorted(set(unknown))[:3]),
+                        id="S6.L0_REQUIRES_DISPATCH", reason="missing:reviewer_expert")
+            else:
+                rep.add(label, "L0 必须有独立审查派发", OK,
+                        "reviewer 派发行：%s" % ", ".join(sorted(set(independent))[:3]),
+                        id="S6.L0_REQUIRES_DISPATCH")
+
+    # --- S6.REVIEW_IDENTITIES（含与账本派发行的对照）---
+    _check_review_identities(ctx, rep, label, ptext, rows)
+
 
 def check_S6(ctx, rep, wf):
     """审查独立性标记 + Rulings / Review 段。
@@ -1062,63 +1889,84 @@ def check_S6(ctx, rep, wf):
     # 证据三态（A-9 同族）：「没有证据」才能 SKIP；「有证据但读不出」是
     # Q2 失败 → FAIL。混同会让独立性核验（L2 = 禁止交付的唯一硬项）
     # 被静默归为「不该查」。
+    #
+    # 这两条分支**不再早退**（M2）：独立性标记查不了，不等于派发证据与
+    # 计划侧身份行也不该查——四项 S6 派发检查必须各出一项。
+    order = {"L0": 0, "L1": 1, "L2": 2}
+    marker = re.compile(r"independence\s*[:：]\s*(L[012])\b", re.I)
+    worst = None
     if ctx["ledger"] and ltext is None:
         rep.add(label, "审查独立性标记 L0/L1/L2", FAIL,
                 "[malformed:ledger_unreadable] 账本存在但读不出，独立性标记无从核验",
                 id="S6.INDEPENDENCE", reason="malformed:ledger_unreadable")
-        return
     # SKIP 仅限「证据确实不存在」（计划 Task 6 第 3 条，P9 复审 🟡 收口）：
     # ctx 里声明了 plan 但读不出 ≠ 没有证据——「声明了却查不出」按
     # missing:independence 落 FAIL（fail-closed），不把「查不了」印成「不该查」。
-    if not ctx["ledger"] and not ctx["plan"]:
+    elif not ctx["ledger"] and not ctx["plan"]:
         rep.add(label, "审查独立性标记 L0/L1/L2", SKIP,
                 "[inapplicable:no_evidence] 无账本与计划，无从核验独立性",
                 id="S6.INDEPENDENCE", reason="inapplicable:no_evidence")
-        return
-
-    order = {"L0": 0, "L1": 1, "L2": 2}
-    marker = re.compile(r"independence\s*[:：]\s*(L[012])\b", re.I)
-
-    hits = []  # [(来源, 级别)]
-    for src, txt in (("ledger", ltext), ("plan", ptext)):
-        if txt is None:
-            continue
-        # 标记取值：剥引用（行内代码 / 表格行），但**保留围栏内容**——
-        # templates/plan-sections.md 规定 ## Review 的内容就写在 ```markdown 里。
-        whole = marker.findall(strip_quoted_markers(txt))
-        # 优先只认 ## Review 段内的标记；段内没有才回退到全文（遗留写法）
-        body = section_body(txt, "Review", keep_fences=True)
-        in_section = marker.findall(strip_quoted_markers(body)) if body is not None else []
-        for lvl in (in_section or whole):
-            hits.append((src, lvl.upper()))
-
-    if not hits:
-        rep.add(label, "审查独立性标记 L0/L1/L2", FAIL,
-                "[missing:independence] 未找到 independence 标记——"
-                "L2（无审查）禁止交付，缺标记等同未审查",
-                id="S6.INDEPENDENCE", reason="missing:independence")
     else:
-        worst_src, worst = max(hits, key=lambda h: order[h[1]])
-        all_hits = ",".join("%s:%s" % (s, l) for s, l in hits)
-        if worst == "L2":
+        hits = []  # [(来源, 级别)]
+        for src, txt in (("ledger", ltext), ("plan", ptext)):
+            if txt is None:
+                continue
+            # 标记取值：剥引用（行内代码 / 表格行），但**保留围栏内容**——
+            # templates/plan-sections.md 规定 ## Review 的内容就写在 ```markdown 里。
+            whole = marker.findall(strip_quoted_markers(txt))
+            # 优先只认 ## Review 段内的标记；段内没有才回退到全文（遗留写法）
+            body = section_body(txt, "Review", keep_fences=True)
+            in_section = marker.findall(strip_quoted_markers(body)) if body is not None else []
+            for lvl in (in_section or whole):
+                hits.append((src, lvl.upper()))
+
+        if not hits:
             rep.add(label, "审查独立性标记 L0/L1/L2", FAIL,
-                    "[forbidden:independence_l2] 级别 L2（无审查，禁止交付）；"
-                    "全部标记：%s（取最坏值）" % all_hits,
-                    id="S6.INDEPENDENCE", reason="forbidden:independence_l2")
+                    "[missing:independence] 未找到 independence 标记——"
+                    "L2（无审查）禁止交付，缺标记等同未审查",
+                    id="S6.INDEPENDENCE", reason="missing:independence")
         else:
-            rep.add(label, "审查独立性标记 L0/L1/L2", OK,
-                    "级别 %s（来源 %s；全部标记：%s）" % (worst, worst_src, all_hits),
-                    id="S6.INDEPENDENCE")
+            worst_src, worst = max(hits, key=lambda h: order[h[1]])
+            all_hits = ",".join("%s:%s" % (s, l) for s, l in hits)
+            if worst == "L2":
+                rep.add(label, "审查独立性标记 L0/L1/L2", FAIL,
+                        "[forbidden:independence_l2] 级别 L2（无审查，禁止交付）；"
+                        "全部标记：%s（取最坏值）" % all_hits,
+                        id="S6.INDEPENDENCE", reason="forbidden:independence_l2")
+            else:
+                rep.add(label, "审查独立性标记 L0/L1/L2", OK,
+                        "级别 %s（来源 %s；全部标记：%s）" % (worst, worst_src, all_hits),
+                        id="S6.INDEPENDENCE")
 
     if ptext is not None:
         if light_wants(ctx, "S6", "rulings"):
-            if has_section(ptext, "Rulings"):
-                rep.add(label, "Rulings 已持久化到计划文档", OK, "", id="S6.RULINGS")
+            # 段存在性按剥围栏判断（模板示例不得冒充）；Ruling 行按保留围栏
+            # 判断——templates/plan-sections.md 规定段内容写在 ```markdown 里。
+            has_rulings = has_section(ptext, "Rulings")
+            rulings_body = (section_body(ptext, "Rulings", keep_fences=True)
+                            if has_rulings else None)
+            has_ruling = bool(rulings_body) and bool(re.search(
+                r"^[ \t]*(?:[-*+][ \t]+)?Ruling[ \t]*[:：]", rulings_body, re.M))
+            if rulings_body is None:
+                # L1 = 主控自审降级。降级本身允许，但**必须留裁决**——
+                # 没有 Ruling 行就没有任何痕迹说明「为什么不是独立审查」。
+                if worst == "L1":
+                    rep.add(label, "Rulings 已持久化到计划文档", FAIL,
+                            "[missing:rulings_l1] independence: L1（主控自审降级）"
+                            "却没有 `## Rulings` 段与 `Ruling:` 行——降级无留痕",
+                            id="S6.RULINGS", reason="missing:rulings_l1")
+                else:
+                    rep.add(label, "Rulings 已持久化到计划文档", WARN,
+                            "[soft:missing_rulings] 计划文档缺 `## Rulings` 段——"
+                            "删 workspace 后决策永久丢失",
+                            id="S6.RULINGS", reason="soft:missing_rulings")
+            elif worst == "L1" and not has_ruling:
+                rep.add(label, "Rulings 已持久化到计划文档", FAIL,
+                        "[missing:rulings_l1] independence: L1（主控自审降级）"
+                        "但 `## Rulings` 段没有任何 `Ruling:` 行——降级无留痕",
+                        id="S6.RULINGS", reason="missing:rulings_l1")
             else:
-                rep.add(label, "Rulings 已持久化到计划文档", WARN,
-                        "[soft:missing_rulings] 计划文档缺 `## Rulings` 段——"
-                        "删 workspace 后决策永久丢失",
-                        id="S6.RULINGS", reason="soft:missing_rulings")
+                rep.add(label, "Rulings 已持久化到计划文档", OK, "", id="S6.RULINGS")
 
         # 段存在 ≠ 结论已写：必须看到结论载体（spec/quality/三态/independence）
         #
@@ -1147,6 +1995,9 @@ def check_S6(ctx, rep, wf):
                         "[soft:review_section_empty] `## Review` 段存在但无结论载体"
                         "（需 spec ✅/❌、quality、三态或 independence）",
                         id="S6.REVIEW", reason="soft:review_section_empty")
+
+    # 派发证据（G6）：L0 必须有 reviewer 派发行，且审查者不得是实施者本人
+    _check_s6_dispatches(ctx, rep, label, ltext, ptext, worst)
 
 
 def check_S7(ctx, rep, wf):
@@ -1412,6 +2263,33 @@ def expand_artifact(root, pattern, change):
     return [p for p in cur if os.path.exists(p)]
 
 
+def detect_git_root(start=None):
+    """Return the enclosing git work-tree root, or None.
+
+    sdd-workspace roots the SDD directory at `git rev-parse --show-toplevel`.
+    workflow_check must use the same root so invoking /wf:check from a
+    subdirectory still finds `.superpowers/sdd/` and the ledger.
+    """
+    cur = os.path.abspath(start or os.getcwd())
+    while True:
+        candidate = os.path.join(cur, ".git")
+        if os.path.isdir(candidate):
+            if os.path.isfile(os.path.join(candidate, "HEAD")):
+                return cur
+        elif os.path.isfile(candidate):
+            try:
+                with open(candidate, "r", encoding="utf-8", errors="replace") as f:
+                    head = f.read(64)
+                if head.lstrip().startswith("gitdir:"):
+                    return cur
+            except OSError:
+                pass
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return None
+        cur = parent
+
+
 def _detect_git_repo(start=None):
     """判断是否在 git 仓库内（与 zcode_dev_workflow.detect_git 同口径）。
 
@@ -1457,20 +2335,84 @@ def detect_env(root):
     }
 
 
+def _normalize_identity(value):
+    """Normalize Git Bash / Windows / POSIX path spellings for ownership compare."""
+    if not value:
+        return ""
+    v = value.strip().replace("\\", "/")
+    # Git Bash: /c/Users/...  -> C:/Users/...
+    m = re.match(r"^/([A-Za-z])/(.*)$", v)
+    if m:
+        v = "%s:/%s" % (m.group(1).upper(), m.group(2))
+    if os.name == "nt":
+        v = v.lower()
+    return v
+
+
+def _plan_identity(root, plan_path):
+    """sdd-workspace 写入 plan-path 的身份值（repo-relative 或 absolute）。"""
+    plan_abs = os.path.abspath(plan_path)
+    root_abs = os.path.abspath(root)
+    try:
+        rel = os.path.relpath(plan_abs, root_abs)
+        if not rel.startswith(".."):
+            return _normalize_identity(rel)
+    except ValueError:
+        pass
+    return _normalize_identity(plan_abs)
+
+
+def _workspace_owner(workspace):
+    text = read(os.path.join(workspace, "plan-path"))
+    return _normalize_identity(text) if text is not None else None
+
+
+def _same_plan_identity(owner, identity, plan_abs):
+    target_abs = _normalize_identity(plan_abs)
+    return owner in (identity, target_abs)
+
+
 def find_workspace(root, plan_path):
-    """定位 SDD workspace。优先按计划 basename，找不到再扫亲代目录名。"""
+    """定位 SDD workspace。
+
+    以 sdd-workspace 的命名与 plan-path 为唯一依据：
+      1. 先按 plan-path 所有权标记精确匹配（支持 <slug>-<parent>-N 去歧义目录）
+      2. 兼容无 marker 的旧目录：<slug>、<slug>-<parent>、<slug>-<parent>-N
+
+    旧实现把顺序写成 <parent>-<slug>，与 sdd-workspace 实际生成规则相反，
+    且不读 plan-path，同名计划冲突时会误报/串账。
+    """
     base = os.path.join(root, ".superpowers", "sdd")
     if not os.path.isdir(base):
         return None
+    plan_abs = os.path.abspath(plan_path)
+    candidates = [
+        name for name in sorted(os.listdir(base))
+        if os.path.isdir(os.path.join(base, name))
+    ]
+
+    identity = _plan_identity(root, plan_path)
+    for name in candidates:
+        owner = _workspace_owner(os.path.join(base, name))
+        if owner and _same_plan_identity(owner, identity, plan_abs):
+            return os.path.join(base, name)
+
     slug = os.path.splitext(os.path.basename(plan_path))[0]
-    cand = os.path.join(base, slug)
-    if os.path.isdir(cand):
-        return cand
     parent = os.path.basename(os.path.dirname(plan_path))
-    for name in (slug, "%s-%s" % (parent, slug)):
+    preferred = [slug, "%s-%s" % (slug, parent)]
+    preferred += sorted(
+        name for name in candidates
+        if name.startswith("%s-%s-" % (slug, parent))
+    )
+    for name in preferred:
         cand = os.path.join(base, name)
-        if os.path.isdir(cand):
-            return cand
+        if not os.path.isdir(cand):
+            continue
+        owner = _workspace_owner(cand)
+        # 有 owner 但不是本计划 → 绝不串账；无 owner 的旧目录保持兼容采用。
+        if owner and not _same_plan_identity(owner, identity, plan_abs):
+            continue
+        return cand
     return None
 
 
@@ -1658,7 +2600,11 @@ def explain(ctx):
 
 def run(change=None, plan=None, scale=None, root=None, expect_archive=False):
     wf = load_workflow()
-    root = os.path.abspath(root or os.getcwd())
+    if root:
+        root = os.path.abspath(root)
+    else:
+        # 与 sdd-workspace 同口径：git 仓库内始终以 work-tree 根为项目根。
+        root = detect_git_root(os.getcwd()) or os.path.abspath(os.getcwd())
     env = detect_env(root)
 
     # 相对路径按 --root 解析，不按进程 cwd——否则跨目录核对会静默指向错误文件
@@ -1691,6 +2637,16 @@ def run(change=None, plan=None, scale=None, root=None, expect_archive=False):
         "expect_archive": expect_archive,
         "trim": None,
     }
+    # 归档后核验：active change 已移走，但 --expect-archive 的语义是
+    # “此刻正在/已经归档”。把 change_dir 切到 archive 副本，S2/S3/S5/S8
+    # 才能继续读同构产物，而不是在 S2.CHANGE_DIR 永久 FAIL。
+    if (expect_archive and change_ok
+            and not os.path.isdir(ctx["change_dir"])):
+        archived_path = _archived_change_path(root, change)
+        if archived_path:
+            ctx["change_dir"] = archived_path
+            ctx["change_dir_archived"] = True
+
     ctx["workspace"] = find_workspace(root, ctx["plan"]) if ctx["plan"] else None
     ctx["ledger"] = (os.path.join(ctx["workspace"], "progress.md")
                      if ctx["workspace"] and os.path.exists(

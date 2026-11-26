@@ -11,7 +11,7 @@
 ## 动作
 
 ```bash
-python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/zcode_dev_workflow.py" triage "<任务>" --files N
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/zcode_dev_workflow.py" triage "<任务>" --files N
 ```
 
 1. 探测环境（**只读，不产生副作用**）
@@ -26,7 +26,8 @@ python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/zcode_dev_workflow.py" tri
 
 任务名 / 类型 / 用户目标 / 涉及模块 / 预估影响范围 / 是否改数据库 / 是否改 API / 是否需多 Agent / 是否需老板确认 / 是否需隔离 / 验收标准 / **领域（category）** / **专家（name/basis）**
 
-> 只读任务不产生账本（D4）：S0 双轴分诊后直接派 **analyst**（领域专家只读分析，四段式输出），
+> 只读任务不产生账本（D4）：S0 双轴分诊后直接派 **analyst**（领域专家只读分析，四段式输出，
+> 仅允许查看/搜索/读取类工具，禁止新增、删除、修改文件），
 > S0.DOMAIN 对其判 SKIP（`workflow_check`）。
 
 ## 退出条件（G0）

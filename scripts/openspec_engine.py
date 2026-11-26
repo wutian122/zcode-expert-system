@@ -286,11 +286,14 @@ def _find_change_spec(cdir: Path):
     return None, None
 
 
-def _merge_delta_into_main(main_text: str, delta_text: str) -> str:
+def _merge_delta_into_main(main_text: str, delta_text: str,
+                           capability: str = None) -> str:
     """把 delta spec 合并进主 spec（行级/段落级规则）。
 
     规则：
     - 主 spec 的 ## Purpose 权威不动（不被 delta 覆盖）。
+    - 新建主 spec 时：delta 有 ## Purpose 则原样复制；否则写明确 TBD 占位，
+      保证紧接着的 validate-specs 不会因为“刚同步就缺 Purpose”而失败。
     - ## Requirements：保留主 spec 既有场景，追加 delta 未提及的新场景（去重）。
     - ## ADDED / ## MODIFIED / ## REMOVED / ## RENAMED：按段落原文合并记录。
     - 其他未知段落：新增则追加，已存在则并入。
@@ -312,6 +315,12 @@ def _merge_delta_into_main(main_text: str, delta_text: str) -> str:
 
     result = {h: list(lines) for h, lines in main_by_header.items()}
     result_order = list(main_order)
+    main_has_purpose = _has_purpose(main_secs)
+    delta_purpose = []
+    for h, lines in delta_secs:
+        if h == "Purpose":
+            delta_purpose = list(lines)
+            break
 
     def _ensure(header):
         if header not in result:
@@ -323,7 +332,7 @@ def _merge_delta_into_main(main_text: str, delta_text: str) -> str:
         if h is None:
             continue
         if h == "Purpose":
-            # 主 spec Purpose 权威不动
+            # 主 spec Purpose 权威不动；新主 spec 的 Purpose 在循环后补齐。
             continue
         if h == "Requirements":
             dst = _ensure("Requirements")
@@ -355,6 +364,19 @@ def _merge_delta_into_main(main_text: str, delta_text: str) -> str:
                 result_order.append(h)
             else:
                 result[h].extend(lines)
+
+    if not main_has_purpose:
+        if any(line.strip() for line in delta_purpose):
+            result["Purpose"] = delta_purpose
+        else:
+            label = capability or "<capability>"
+            result["Purpose"] = [
+                "",
+                "TBD: 请补充 %s 能力的目标与边界。" % label,
+            ]
+        if "Purpose" in result_order:
+            result_order.remove("Purpose")
+        result_order.insert(0, "Purpose")
 
     out = []
     if leading:
@@ -389,7 +411,11 @@ def cmd_sync_specs_change(args) -> int:
     main_path = main_dir / "spec.md"
     main_text = main_path.read_text(encoding="utf-8") if main_path.is_file() else ""
     delta_text = delta_path.read_text(encoding="utf-8")
-    merged = _merge_delta_into_main(main_text, delta_text)
+    main_has_purpose = _has_purpose(_split_sections(main_text))
+    delta_has_purpose = _has_purpose(_split_sections(delta_text))
+    purpose_mode = ("main" if main_has_purpose
+                    else ("delta" if delta_has_purpose else "placeholder"))
+    merged = _merge_delta_into_main(main_text, delta_text, capability)
 
     if args.dry_run:
         print(json.dumps({
@@ -397,6 +423,8 @@ def cmd_sync_specs_change(args) -> int:
             "capability": capability,
             "dry_run": True,
             "target": str(main_path),
+            "purpose": purpose_mode,
+            "purpose_placeholder": purpose_mode == "placeholder",
         }, ensure_ascii=False, indent=2))
         return 0
 
@@ -413,6 +441,10 @@ def cmd_sync_specs_change(args) -> int:
         "merged": True,
         "target": str(main_path),
         "backup": str(backup_path) if backup_path else None,
+        "purpose": purpose_mode,
+        "purpose_placeholder": purpose_mode == "placeholder",
+        **({"purpose_hint": "主 spec 已写入 TBD Purpose，请补充后再归档"}
+           if purpose_mode == "placeholder" else {}),
     }, ensure_ascii=False, indent=2))
     return 0
 

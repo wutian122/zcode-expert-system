@@ -8,6 +8,10 @@
 >   Review Focus / Global Constraints / Dependencies / File Scope
 > - **证据段（4）**：Baseline（S4）/ Review + Rulings（S6）/ Integration Verification（S7）
 >
+> **Bug 任务额外要求**：计划文档必须有 `## Bug Investigation` 段，把 Bug 专项
+> 的入口分诊、9 问根因、假设、方案、双确认、RED、red-green、全量回归同步进来。
+> 该段是 P3 证据，不能只留在会话或 P4 workspace。
+>
 > （缺陷 #13：本节此前只有后半组 6 段，缺 G3 的 6 段，照模板写必被判 6 个 FAIL。）
 
 ---
@@ -117,11 +121,17 @@
 
 ## Review
 
+> **`implementer:` / `reviewer:` 必填。** 这两行是「谁实施、谁审查」的唯一落纸
+> 位置，`workflow_check` 用它们与账本 `## Dispatches` 对照：
+> medium/large/bug 缺失即 `S6.REVIEW_IDENTITIES` FAIL，light 降为 WARN。
+> 填 `config/experts.json` 里的专家名，**不得填「主控」**；
+> `independence: L1`（主控自审降级）必须在 `## Rulings` 留一条 `Ruling:` 说明理由。
+
 ```markdown
 ## Review
 - independence: L0        # L0 独立子代理 / L1 主控自审降级 / L2 无审查（禁止交付）
+- implementer: 软件架构师
 - reviewer: 代码审查员
-- implementer: 后端架构师
 - spec: ✅ SPEC-OK
 - quality: APPROVED
 - round: 1
@@ -157,6 +167,56 @@ Ruling: 跳过 Task 5 的集成测试 — 该接口无外部依赖 — 若后续
 | 退出码 | `<0>` |
 | 通过/失败 | `<142 passed, 0 failed>` |
 | 目标树 | `<合并后分支 / 当前树>` |
+
+---
+
+## Bug Investigation
+
+> **仅 Bug 规模必填。** 这是 Bug 专项的 P3 证据；P4 会话记录不能替代。
+
+```markdown
+## Bug Investigation
+
+### 入口分诊
+- 类型：<代码逻辑 / 构建CI / 依赖环境 / Web UI / 远程服务器 / 工具失灵 / 性能>
+- 判定依据：<一句话>
+
+### 根因调查
+- 复现命令 / 输出 / 退出码：<命令 + 关键输出 + rc>
+- 9 问结论：<逐条或表格>
+- 直接原因：<...>
+- 根本原因：<...>
+
+### 假设三段
+- 假设：<X 是根因>，因为 <Y>
+- 预期证据：<A>
+- 最小检验：<B>
+- 结果：<证实 / 证伪 / 回 Phase 1>
+
+### 分级与方案
+- 分级：🔴 / 🟠 / 🟡 / 🟢
+- 方案 A：<思路 / 范围 / 风险 / 工作量 / 测试策略>
+- 方案 B：<同上>
+- 副作用自查：<下游 / 行为反转 / 组合影响 / 阻断级风险>
+
+### 双确认
+- 老板选择：<A/B/C>
+- 确认原话与时间：<必须是「执行/开始/动手/go/确认执行/修」>
+
+### TDD 复现
+- RED 命令：<...>
+- RED 输出：<关键失败原文>
+- RED 退出码：<非 0>
+- 失败原因是否等于缺陷本身：<是 / 否>
+
+### red-green 复验
+- GREEN → 还原修复 → RED → 恢复修复 → GREEN：<四段记录>
+
+### 全量回归
+- 命令 / 退出码：<...>
+- 通过 / 失败：<...>
+- 基线失败清单比对：<既存 / 本次引入>
+```
 
 ---
 

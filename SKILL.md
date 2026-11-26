@@ -1,10 +1,13 @@
 ---
 name: zcode-expert-system
 description: Use when a task spans design, development, security, marketing, testing, research, finance, legal, healthcare or any other professional domain and needs routing to a specialist, or when the task is a software engineering task that needs a disciplined workflow (requirements → spec → plan → TDD → review → delivery). 331 experts in 32 top-level categories with two-axis routing (scale → workflow stages, domain → expert), nine-stage dev workflow with gates and evidence. Also use when the user says 专家 / 会诊 / 多专家 / 专业分析 / 任务路由 / 任务分解 / 工作流 / 研发流程.
-version: "3.2.3"
+version: "3.2.5"
 ---
 
-# ZCode Expert System v3.2
+# ZCode Expert System v3.2.5
+
+**运行平台**：ZCode / Claude Code / Qoder Desktop。宿主只影响安装目录与派发名格式，
+两轴路由、九阶段门禁证据链与 `/wf:*` 命令协议完全一致。
 
 **两轴正交路由**：
 
@@ -21,7 +24,7 @@ version: "3.2.3"
 
 | # | 步骤 | 命令 / 动作 |
 |---|---|---|
-| 1 | **规模分诊** | `${ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/zcode_dev_workflow.py triage "<任务>" --files N` |
+| 1 | **规模分诊** | `${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/zcode_dev_workflow.py triage "<任务>" --files N` |
 | 2 | **说出口** | 「老板，任务分类结果：只读/轻量/中任务/大任务/Bug」——不能不说 |
 | 3 | **域路由**（**所有规模必做，readonly 亦不例外**） | `triage` 已双轴合一——规模与领域路由一次产出；亦可 `zcode_expert_system(task)` 取 `category` + `top_candidates` + `score_detail` |
 | 4 | **语义精判（主控亲自做）** | 见下；`semantic_selection_required` 为 true 时**必须**自己定夺 |
@@ -49,15 +52,20 @@ r["top_candidates"][0]["score_detail"]
 
 ### 低置信度处置（第 4 步后必查）
 
-`zcode_expert_system(task)` 返回 `confidence` / `alternatives` / `routing_warning`：
+`zcode_expert_system(task)` 返回 `confidence` / `confidence_detail` / `alternatives` / `routing_warning`：
+
+`confidence` 不再是“词面强度”，而是**绝对证据 × top1-top2 margin**：单 2 字关键词最高 0.5，真并列最高 0.45，长复合词/多证据才可能接近 1.0。
 
 | confidence | 含义 | 动作 |
 |---|---|---|
-| ≥ 0.5 | 信号明确 | 进入语义精判 |
-| < 0.5 且 `alternatives` 非空 | 多个领域同分 | **先问一句**「更偏 A 还是 B？」，选定后再派 |
+| ≥ 0.5 | 证据足够 | 保留派发，但**必须**执行 `semantic_recheck`（复核 `score_detail`） |
+| < 0.5 | 证据不足/并列/单弱词 | **阻断派发**，plan 含 `blocking` + `clarify_options`；先澄清领域 |
+| `confidence_detail.margin < 0.15` | top1/top2 差距过小 | 按低置信度处理 |
 | = 0.0 | 无信号，落默认 `business-support` | **必须澄清**，禁止拿 `business-support` 专家硬套 |
 
 `selected_expert` 为 `None` 时**不得自行挑第一个候选**——那等于绕过相关性判断。按 `routing_warning` 向老板澄清后再派。
+
+**高置信度只要求复核，不再同时置 blocking**：`blocking` 与派发行并存是旧契约的自相矛盾。低置信度必须 `blocking` 且不产出 analyst/implementer/reviewer 派发行。
 
 **所有任务（含只读与机械任务）都必须完成两轴分诊，不得跳过域路由**（W10）。只读任务派 **analyst**（领域专家）只读分析，不得由主控凭通识自行分析；机械任务一旦需要领域解释或决策，必须升级为派专家。**复核/审查任何产出（含主控自己的产出）属于领域判断，必须派独立专家（实施者≠审查者），不得以「机械核对」名义自审。**
 
@@ -96,7 +104,7 @@ r["top_candidates"][0]["score_detail"]
 
 **规模只能升级不能降级。**
 
-### Bug 专项方法（zes-systematic-debugging 核心，详见 `vendor/skills/zes-systematic-debugging/SKILL.md`）
+### Bug 专项方法（zes-systematic-debugging 核心，详见 `zes-systematic-debugging` 技能）
 
 **铁律：无根因不修复；无失败测试不修码。**
 
@@ -107,6 +115,7 @@ r["top_candidates"][0]["score_detail"]
 - **3 连败即质疑架构**：3 次修复仍失败，停止继续修——「每次修复都在新地方暴露新问题」是架构信号，与老板讨论是否重构，而非第 4 次尝试
 - **双确认门禁**（老板专项）：①方案等老板选 A/B/C，未选不改码；②选定后再确认执行（"好的/OK"不算确认，须"执行/开始/修"等明确动词）
 - **红旗信号**（出现即回 Phase 1）：「先快速修了再说」「试试改 X 看行不行」「跳过测试手动验证」「我大概知道是哪」——猜测式修复是失败之母
+- **P3 证据（强制）**：上述入口分诊、9 问根因、假设、方案、双确认、RED、red-green、全量回归必须同步到计划文档 `## Bug Investigation`，不能只留在会话或 P4 workspace
 
 ---
 
@@ -150,6 +159,11 @@ Agent(
 
 **流程契约优先于专家人格**——派发 prompt 首段必须硬声明这一点，否则架构类专家会自己重新设计架构。
 
+**专家名称可见性**：每次派发前，主控先在会话中显示一行
+`正在调用专家：<专家中文名>`；`Agent` / `Task` 的 `description` 使用
+`专家：<专家中文名>`。三平台统一使用中文裸名/限定名的 `subagent_type`，
+但可见标题必须显示专家名，不得只显示 Agent 或 general-purpose。
+
 ### Reviewer 独立性（三重保证）
 
 331 专家里只有 1 位「代码审查员」，独立性不能靠"类型多"：
@@ -168,7 +182,7 @@ Agent(
 |---|---|---|---|
 | **P1** | 文件快照哈希 或 git commit | 实际改了什么 | 交付后归档 |
 | **P2** | `openspec/changes/<n>/tasks.md` + 计划文档 `## Rulings` | 完成度、ADR 决策 | 归档永久 |
-| **P3** | 计划文档的 `## Baseline` / `## Review` / `## Rulings` / `## Integration Verification` | 基线、审查、裁决、交付重测 | 随仓库 |
+| **P3** | 计划文档的 `## Bug Investigation` / `## Baseline` / `## Review` / `## Rulings` / `## Integration Verification` | 根因、基线、审查、裁决、交付重测 | 随仓库 |
 | **P4** | `.superpowers/sdd/<plan>/` | ledger / brief / report / 快照 | **终审后删，删前必须导出 P3** |
 
 > **铁律：P4 未导出，禁止删 workspace。** 否则基线、裁决、重测记录整体消失——这是源规范最危险的两处丢失。
@@ -220,7 +234,7 @@ Agent(
 ## 八、机械核对（不靠自觉）
 
 ```bash
-python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/scripts/workflow_check.py" --change <change> --plan <plan.md> --scale medium
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/workflow_check.py" --change <change> --plan <plan.md> --scale medium
 ```
 
 核对项：环境探测 / 规格产物 / 计划必备段 / 任务标题格式 / 占位符 / 双账本对齐 / 基线双写 / 账本身份 / 三元对齐 / 独立性标记 / Rulings 持久化 / 集成后重测 / 归档完成度。
@@ -278,7 +292,7 @@ python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/scripts/workflow_check.py"
 
 #### 🔴 语义精判契约（必读）
 
-**本插件不额外配置 LLM/Embedding 服务**——这是刻意设计，不是缺陷：插件运行在 ZCode 会话内，
+**本插件不额外配置 LLM/Embedding 服务**——这是刻意设计，不是缺陷：插件运行在宿主会话内，
 会话里正在跑的模型就是可用模型，再接外部 LLM 既重复又要凭据要花钱。
 所以 `scripts/llm_client.py` 的 `_call_llm` 与 `embedding_client.py` 的 `get_embedding`
 恒返回 `None`，粗筛退化为本地词元重叠。
@@ -312,7 +326,7 @@ out = build_dispatch_for_expert("后端架构师", "实现用户登录接口")
 - 若某专家名不在会话子代理清单 → 回退为「读取该专家提示词后代入人格执行」
 - **32 位总经理同样可派发**，用 **slug** `manager-<分类>`（如 `manager-backend-architecture`），
   用于本领域多专家协同的复杂任务。**总经理用 slug、专家用中文显示名**——
-  `install.js` 写入总经理部署文件的 `name:` 是 slug，写中文名会找不到代理。
+  各平台安装链写入总经理部署文件的 `name:` 是 slug，写中文名会找不到代理。
 
 ---
 
@@ -325,10 +339,10 @@ result = zcode_expert_system("设计一个支持高并发的后端 API 接口")
 ```
 
 ```bash
-python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/zcode_dev_workflow.py" triage "<任务>" --files N   # 规模分诊
-python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/zcode_dev_workflow.py" stages medium              # 阶段序列
-python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/zcode_dev_workflow.py" plan "<任务>" --files N     # 派发计划（角色×专家）
-python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/zcode_dev_workflow.py" states                     # 状态机定义
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/zcode_dev_workflow.py" triage "<任务>" --files N   # 规模分诊
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/zcode_dev_workflow.py" stages medium              # 阶段序列
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/zcode_dev_workflow.py" plan "<任务>" --files N     # 派发计划（角色×专家）
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/zcode_dev_workflow.py" states                     # 状态机定义
 ```
 
 ---
@@ -352,6 +366,7 @@ python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/zcode_dev_workflow.py" sta
 | `context/context-manager.py` | 上下文管理 |
 | `commands/wf/*.md` | 12 个 /wf:* 斜杠命令（triage/check/plan/… 的机械动作入口） |
 | `templates/*.md` | 人工取用模板：plan-sections（计划 12 必备段）/ progress（SDD 账本·七态）/ task-report（任务报告）/ review-report（审查报告）/ bug-report（Bug 报告）/ minimal-contract（最小执行契约） |
-| `hooks/hooks.json` + `hooks/prepend-global-rules-reminder.mjs` | UserPromptSubmit 每轮注入触发规则 |
-| `scripts/install.js` | 部署 / 卸载入口（bin/cli.js install/uninstall 转调） |
+| `hooks/hooks.json`（ZCode）/ `hooks/claude-hooks.json`（Claude）/ `~/.qoder/settings.json`（Qoder）+ `hooks/prepend-global-rules-reminder.mjs` | UserPromptSubmit 每轮注入触发规则 |
+| `scripts/install.js` | 统一部署 / 卸载入口（ZCode / Claude Code / Qoder 目标；bin/cli.js 转调） |
+| `scripts/install-qoder.js` | Qoder 用户级部署 / 状态 / 卸载（Skill / Commands / Agents / Hook） |
 | `tests/*.py` | 回归防线（pytest 全量必须绿；改动后跑 `python -m pytest tests/ -q`） |

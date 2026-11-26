@@ -10,10 +10,10 @@ name: wf-triage
 ## 执行
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/zcode_dev_workflow.py" triage "<任务描述>" --files <预估文件数>
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/zcode_dev_workflow.py" triage "<任务描述>" --files <预估文件数>
 ```
 
-随后 `${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/zcode_dev_workflow.py stages <scale>` 取阶段序列。
+随后 `${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/zcode_dev_workflow.py stages <scale>` 取阶段序列。
 
 ## 必须输出（说出口，不能不说）
 
@@ -29,7 +29,7 @@ python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/zco
 ## 判据
 
 - **双轴合一**：`triage` 一次产出规模 + 领域路由——所有任务（含只读与机械任务）都必须完成，不得跳过域路由（W10）
-- **只读**：无写动作 → 派 analyst（领域专家只读分析，四段式输出），不进实施流程
+- **只读**：无写动作 → 派 analyst（领域专家只读分析，四段式输出），不进实施流程；只允许查看/搜索/读取类工具，禁止新增、删除、修改文件
 - **轻量**：≤3 文件 → 简化流程，但 TDD 与验证不可跳
 - **中/大任务**：九阶段完整
 - **Bug**：优先于规模，走根因流程
@@ -43,7 +43,7 @@ python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/zco
 ## 环境探测（本命令内含）
 
 - `git rev-parse --is-inside-work-tree` → 决定 diff 还是快照证据路径
-- `python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py" list` → 读 `root`；`null` 属正常返回，**不重试、不自动 init**
+- `python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" list` → 读 `root`；`null` 属正常返回，**不重试、不自动 init**
   - 我自选 OpenSpec 且 root=null → 静默放弃，不提 setup
   - 老板点名/主管道已启动 → 停，三选一：`init` / `--store <id>` / 不用
 

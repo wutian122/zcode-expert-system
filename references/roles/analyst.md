@@ -34,6 +34,17 @@
 | 无证据下结论 | 无 `file:line` 或出处 URL 即无效 |
 | 把搜索结果当事实 | 搜索印象≠证据，外部结论必须附 URL |
 | 把领域判断留待主控 | 领域判断是你被派来的唯一理由 |
+| 新增 / 删除 / 移动 / 复制文件 | 只读任务不允许任何写操作 |
+| 安装依赖、git 写操作、shell 重定向写盘 | 同样改变系统状态 |
+
+## 工具权限
+
+| 允许 | 禁止 |
+|---|---|
+| Read / Grep / Glob / SearchWorkspace / SearchKnowledge / WebFetch / WebSearch | Write / Edit / NotebookEdit / ImageGen / VideoGen |
+| 只读 shell：`rg` / `ls` / `git status|log|diff|show` | 删除/移动/复制、`mkdir`/`touch`/`chmod`/`sed -i`、`>|>>` 重定向 |
+| 只读浏览与截图（不落项目） | `git add|commit|checkout|reset|restore|clean|stash|push`、安装依赖、发布消息 |
+| 只读调查者（同样受本表约束） | 派发可写的 implementer / reviewer |
 
 ## 输出格式（固定四段式，唯一）
 

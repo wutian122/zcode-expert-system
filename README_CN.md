@@ -1,23 +1,24 @@
-# ZCode Expert System v3.2.3 - ZCode 专家体系
+# ZCode Expert System v3.2.5 - ZCode 专家体系
 
 [English](README.md) · **简体中文**
 
 ## 📋 项目简介
 
-**ZCode Expert System** 是**同时适配 ZCode 与 Claude Code 的专家体系插件**，基于 [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents) 的 331 位专家完整人格提示词，实现**两轴正交路由**：规模轴决定流程走多长，域轴决定派哪位专家。
+**ZCode Expert System** 是**同时适配 ZCode、Claude Code 与 Qoder Desktop 的专家体系**，基于 [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents) 的 331 位专家完整人格提示词，实现**两轴正交路由**：规模轴决定流程走多长，域轴决定派哪位专家。
 
-同一个包可部署到两个平台。ZCode 读取 `.zcode-plugin/` 与 `hooks/hooks.json`，Claude Code 读取 `.claude-plugin/` 与 `hooks/claude-hooks.json`。两侧完全隔离——安装到任一侧都不会影响另一侧。
+同一个包可部署到三个平台。ZCode 读取 `.zcode-plugin/` 与 `hooks/hooks.json`，Claude Code 读取 `.claude-plugin/` 与 `hooks/claude-hooks.json`，Qoder 使用用户级 Skill / Commands / Agents，并把 Hook 合并进 `settings.json`。三侧完全隔离——安装到任一侧都不会修改另外两侧。
 
 | 平台 | 清单 | 钩子配置 | 子代理位置 | 派发名 |
 |---|---|---|---|---|
 | ZCode | `.zcode-plugin/plugin.json` | `hooks/hooks.json`（`type: process`） | `~/.zcode/agents/` | `后端架构师`（中文裸名） |
 | Claude Code | `.claude-plugin/plugin.json` | `hooks/claude-hooks.json`（`type: command`） | 插件内 `agents/` | `zcode-expert-system:后端架构师`（限定名） |
+| Qoder Desktop | 用户级目录 + 部署清单 | `~/.qoder/settings.json` → `UserPromptSubmit` | `~/.qoder/agents/` | `后端架构师`（中文裸名） |
 
 ## 🏗️ 架构设计
 
 ### 系统概述
 
-ZCode Expert System v3.2.3 是 ZCode 的专家路由插件。它承载来自 [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents) 的 331 位专家完整人格提示词，并融合 **Superpowers 工程能力体系** 与 **OpenSpec 规格驱动开发体系**。插件采用**两轴正交路由**：
+ZCode Expert System v3.2.5 是适配 ZCode、Claude Code 与 Qoder Desktop 的专家路由系统。它承载来自 [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents) 的 331 位专家完整人格提示词，并融合 **Superpowers 工程能力体系** 与 **OpenSpec 规格驱动开发体系**。插件采用**两轴正交路由**：
 
 | 轴 | 回答问题 | 实现 |
 |---|---|---|
@@ -64,7 +65,7 @@ ZCode Expert System v3.2.3 是 ZCode 的专家路由插件。它承载来自 [ds
            ▼
 ┌─────────────────────────────────┐
 │  第三层：领域专家（331 位）      │
-│  已注册为 ZCode 子代理          │
+│  已注册为宿主子代理             │
 │  由专家中文显示名派发           │
 └─────────────────────────────────┘
 ```
@@ -84,10 +85,13 @@ ZCode Expert System v3.2.3 是 ZCode 的专家路由插件。它承载来自 [ds
 
 | 条件 | 行为 |
 |---|---|
-| `confidence ≥ 0.5` | 进入语义复核 |
-| `confidence < 0.5` **且** `selection_basis: heuristic` | **实施者派发被阻断**（`action: blocked_low_confidence` + `plan.blocking`）；须先向老板澄清领域，词元兜底选出的专家不得直接派发 |
+| `confidence ≥ 0.5` 且 margin 足够 | 保留派发，附加 `semantic_recheck` 动作；主控必须复核 `top_candidates[].score_detail`。**不再同时置 blocking** |
+| `confidence < 0.5` **且** `selection_basis: heuristic` | **实施者/分析者派发被阻断**（`action: blocked_low_confidence` + `plan.blocking` + `clarify_options`）；须先向老板澄清领域 |
+| `confidence_detail.margin < 0.15` | 按低置信度处理——top1/top2 差距过小，胜者只靠声明序/微小分差 |
 | `confidence < 0.5`，但语义复核已完成 | 允许派发，但附加 `semantic_recheck` 动作，主控必须复核 `top_candidates[].score_detail` |
 | `confidence = 0` | `domain.no_signal = true`——此时的 category 只是 `business-support` 兜底，不构成真实领域判断 |
+
+> `confidence` 含义已改为**绝对证据 × top1-top2 margin**：单 2 字关键词最高 0.5，真并列最高 0.45，长复合词/多证据才可能接近 1.0。不要再看单个关键词就当成高置信。
 
 > **词边界护栏**：`返回500` 不会命中 `返回5000行数据`（尾部数字段后面再接数字，视为更长数字串的一部分）；零宽字符（ZWSP / BOM / 软连字符）在匹配前即被清洗，无法借此绕过 Bug 判定。
 
@@ -101,6 +105,18 @@ ZCode Expert System v3.2.3 是 ZCode 的专家路由插件。它承载来自 [ds
 | **混合任务主诉** | 按诉求出现的位置定主诉：「修复...bug，顺便增加日志」判 **Bug**；「增加修复后的日志采集功能」判**非 Bug** |
 | **表间一致性校验** | `tests/test_p4_consistency.py` 新增三表一致性测试：`NEW_BUILD_VERBS` / `FEATURE_CONTEXT`（名词豁免外）的实施动词必须在 `WRITE_SIGNALS` 登记（或显式豁免留档）；历次实证缺陷动词（变更/改变/搭建/建设）为种子锚——再缺主表必红 |
 | **领域路由补词** | `frontend-client` 词表补「博客」：「搭建一个博客系统」不再因泛化词噪声决胜误路由 hr（conf=0.0268） |
+| **解释意图（批次 1）** | 「说明/解释/讲解/对比/是什么/区别」优先判只读；纯现象 Bug 不再单独成案，「说明 Bug 与失败的区别」不再误判 Bug |
+| **修复自证（批次 1）** | 只有「修复」动词、没有第二个故障信号时不再判 Bug：「说明修复流程」「修复 README 错别字」不再进根因流程；「修复登录接口的鉴权 bug」仍判 Bug |
+| **元语言引号（批次 1）** | 引号内 ≤12 字且不含实施动词的短标签不参与信号：「说明 “Bug/失败” 的判定」判只读；「修复「登录页」白屏」仍判 Bug |
+| **margin 置信度（批次 2）** | `confidence = 绝对证据 × top1-top2 margin`：单 2 字关键词最高 0.5，真并列最高 0.45；不再“最长关键词唯一命中即 1.0” |
+| **低置信度硬门（批次 2）** | `confidence < 0.5` 或 `margin < 0.15`：不产出 analyst/implementer/reviewer 派发行，只给 `blocked_low_confidence` + `blocking` + `clarify_options` |
+| **高置信度不再假 blocking（批次 2）** | 高置信度只要求 `semantic_recheck` 动作，不再同时置 `blocking`；消除“阻断文案 + 派发行并存”的矛盾 |
+| **IDF 与字段去噪（批次 3）** | 专家 prompt 读取上限 3000→800 字；`专家/测试/评估/审计/操作` 在相应语境下不参与专家排序；`score_detail` 暴露 `name_idf/desc_idf/prompt_idf` 与被过滤词 |
+| **复合词补口（批次 3）** | 补 `搜索相关性 / 相关性评估 / 评测集 / 专家路由 / 安装注册 / 插件安装 / CLI 工具 / 工作流修复` 等复合词；不收裸「搜索/插件/安装」避免劫持 |
+| **类目画像（批次 3-4）** | 代码支持读取 `config/categories.json` 的 `description` 作为类目语义画像；**32 类已全部补齐**，不再只有 `frontend-client` |
+| **关键词长度权重（批次 4）** | 2 字 1.0 / 3 字 1.5 / 4 字 2.0 / 5+ 字按 0.2 递增（上限 3.0）；「客户成功流程」能压过「客户成功」，「等保合规标书」能压过「等保」 |
+| **路由评估集（批次 3-4）** | `tests/test_routing_eval.py`：**64 条正例（32 类 × 2）+ 5 条 hard negative + 9 条专家 top1**；门槛 top1 ≥0.95、hard-negative 正确/阻断 ≥0.8 |
+| **派发证据门禁** | `workflow_check` 解析账本 `## Dispatches` 与计划 `## Review` 身份，新增 7 项检查：无 implementer 派发、孤儿 report、L0 无 reviewer、同名 reviewer、计划/账本身份不一致、删账本伪清理等均 FAIL；`tests/test_dispatch_evidence.py` 37 条专项测试 |
 
 **残余风险留档（实测记录，均为可接受偏置）**：
 
@@ -118,7 +134,7 @@ ZCode Expert System v3.2.3 是 ZCode 的专家路由插件。它承载来自 [ds
 | **实施者（Implementer）** | ✅ 域专家 | 禁派子代理；不得超 brief 范围；TDD |
 | **审查者（Reviewer）** | ✅ **异域专家** | 只读；不采信自评；必须给出 spec 符合性 + 代码质量双结论 |
 | **调查者（Investigator）** | ✅ 域专家 | 只读；结论带 `file:line` |
-| **分析者（Analyst）** | ✅ 域专家 | 只读分析；四段式「现象→原因→影响→建议」；领域判断不留主控 |
+| **分析者（Analyst）** | ✅ 域专家 | 只读分析；四段式「现象→原因→影响→建议」；领域判断不留主控；仅查看类工具，禁止增删改 |
 
 **流程契约优先于专家人格**——派发 prompt 首段必须硬声明这一点，否则架构类专家会自己重新设计架构。
 
@@ -153,7 +169,7 @@ ZCode Expert System v3.2.3 是 ZCode 的专家路由插件。它承载来自 [ds
 |---|---|---|---|
 | **P1** | 文件快照哈希 或 git commit | 实际改了什么 | 交付后归档 |
 | **P2** | `openspec/changes/<n>/tasks.md` + 计划文档 `## Rulings` | 完成度、ADR 决策 | 归档永久 |
-| **P3** | 计划文档 `## Baseline` / `## Review` / `## Rulings` / `## Integration Verification` | 基线、审查、裁决、交付重测 | 随仓库 |
+| **P3** | 计划文档 `## Bug Investigation` / `## Baseline` / `## Review` / `## Rulings` / `## Integration Verification` | 根因、基线、审查、裁决、交付重测 | 随仓库 |
 | **P4** | `.superpowers/sdd/<plan>/` | ledger / brief / report / 快照 | **终审后删，删前必须导出 P3** |
 
 > **铁律：P4 未导出，禁止删 workspace。** 否则基线、裁决、重测记录整体消失——这是源规范最危险的丢失点。
@@ -198,12 +214,17 @@ ZCode Expert System v3.2.3 是 ZCode 的专家路由插件。它承载来自 [ds
 ### 机械核对（不靠自觉）
 
 ```bash
-python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/scripts/workflow_check.py" --change <change> --plan <plan.md> --scale medium
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/workflow_check.py" --change <change> --plan <plan.md> --scale medium
 ```
 
 核对项：环境探测 / 规格产物 / 计划必备段 / 任务标题格式 / 占位符 / 双账本对齐 / 基线双写 / 账本身份 / 三元对齐 / 独立性标记 / Rulings 持久化 / 集成后重测 / 归档完成度。
 
 退出码：`0` 无 FAIL，`1` 有 FAIL（不得进下一阶段）。
+
+`--expect-archive` 支持归档后核验：active 的 `openspec/changes/<change>/`
+已移走但 archive 副本存在时，S2 会切到
+`openspec/changes/archive/YYYY-MM-DD-<change>/` 检查产物，不再永久
+`S2.CHANGE_DIR` FAIL。
 
 > **归档前必须校验 `tasks.md` 勾选**：存在未勾选任务时拒绝归档（`completedTasks == totalTasks`，只认 `x`/`X`）。Hook 每轮也会检测未完成任务并告警，不依赖主控自觉。
 
@@ -232,133 +253,127 @@ python "$ZCODE_PLUGIN_ROOT/skills/zcode-expert-system/scripts/workflow_check.py"
 
 ## 📦 安装方法
 
-### 方式一：npm 一键安装（推荐）
+CLI 只暴露两个命令：
 
 ```bash
-# 1. 全局安装
-npm install -g zcode-expert-system
-
-# 2. 部署到 ZCode
 zcode-expert-system install
-
-# 3. 重启 ZCode（子代理清单在会话启动时加载，必须重启）
+zcode-expert-system uninstall
 ```
 
-安装脚本会自动完成：
+### install
 
-- 插件缓存目录 + 插件清单（ZCode 靠它识别插件）
-- 技能本体到 `~/.zcode/skills/zcode-expert-system/`
-- 插件级 hooks 到插件根 `hooks/`
-- 32 个总经理 + 331 位专家子代理到 `~/.zcode/agents/`
-- 注册到 `~/.zcode/cli/plugins/installed_plugins.json`
+```bash
+npm install -g zcode-expert-system
+zcode-expert-system install
+```
 
-### 方式二：GitHub 源码安装
+会弹出多选菜单：
+
+```text
+ZCode
+Claude Code
+Qoder
+```
+
+用 `Space` 选中一个或多个目标，`Enter` 确认。非交互终端默认 ZCode + Claude Code；
+Qoder 需交互勾选，或脚本化使用 `--targets`：
+
+```bash
+zcode-expert-system install --targets zcode
+zcode-expert-system install --targets claude-code
+zcode-expert-system install --targets qoder
+zcode-expert-system install --targets zcode,claude-code,qoder
+```
+
+`--dry-run` 只打印计划动作，不改动磁盘。
+
+从源码仓库安装时，`npm install` 只安装依赖，**不会**在 `node_modules/.bin`
+里生成 `zcode-expert-system` 可执行文件。请直接经 `node`（或 `npx .`）运行 CLI：
 
 ```bash
 git clone https://github.com/wutian122/zcode-expert-system.git
 cd zcode-expert-system
-npm install
-zcode-expert-system install
+npm install                 # 只装依赖
+node bin/cli.js install     # 等价于 npx . install
+node bin/cli.js uninstall   # 等价于 npx . uninstall
 ```
 
-> 注：`.zcode-plugin/plugin.json` 的 `skills` 字段仅对**部署后布局**生效
-> （install.js 部署之后）；仓库直装（源码方式）请将技能目录指向仓库根。
+> **破坏性变更：** CLI 已收敛为只有 `install` / `uninstall` 两个命令。
+> 平台专用子命令（`cc-install`、`cc-uninstall`、`qoder-install`、
+> `qoder-uninstall`、`qoder-status`、`version`、`help`）与
+> `npm run cc:install` / `npm run qoder:install` 别名均已移除；
+> 平台选择改在 `install` / `uninstall` 的菜单里完成，脚本化场景用
+> `--targets` / `--zcode --claude-code --qoder`。
 
-### 方式三：ZCode 插件市场安装
+各平台部署内容：
 
-（尚未上架，当前请用方式一 npm 安装。）在 ZCode 的插件市场中搜索
-`zcode-expert-system` 并点击安装。
+| 宿主 | 安装内容 |
+|---|---|
+| ZCode | 插件缓存 + 技能（`~/.zcode/skills/zcode-expert-system`）+ 命令 + hooks + 363 个 Agent + 插件注册 + 图标 marketplace |
+| Claude Code | 本地 marketplace `zcode-local` → `claude plugin install` + 363 个 Agent（插件根 `agents/`） |
+| Qoder Desktop | 用户级 `~/.qoder/skills`、`~/.qoder/commands/wf`、`~/.qoder/agents`，并合并 `~/.qoder/settings.json` 的 `UserPromptSubmit` Hook |
 
-### 方式四：Claude Code 插件
+三平台部署都带齐同一套运行时组件：`scripts/workflow_check.py`（机械门禁核对，
+含 dispatch 派发证据门禁）、`config/categories.json`（32 类 description 画像）、
+`config/experts.json`、`config/workflow.json`、`templates/`、`references/`、
+`hooks/`、`SKILL.md` 与三个根级 Python 入口。Claude Code 额外带 `context/`、`bin/`；
+Qoder 额外合并 `UserPromptSubmit` Hook。
 
-本包同时支持 Claude Code 插件形态。Claude Code 读取 `.claude-plugin/` 目录和
-`hooks/claude-hooks.json`（Claude Code 格式），ZCode 读取 `.zcode-plugin/` 和
-`hooks/hooks.json`（ZCode 格式）。两套配置完全隔离：
+安装器在复制后会**校验部署副本**，缺任一运行时组件即非零退出——残件不会报「完成」：
+
+```text
+✅ ZCode 技能部署校验通过：workflow_check / categories(32 类) / templates / references 均在位
+```
+
+> Claude Code 注册依赖 `claude` CLI：安装器会构建本地 marketplace，并执行
+> `claude plugin marketplace add` / `claude plugin install`。只复制文件而不注册，
+> `/plugin` 不会显示插件。未检测到 CLI 时仅复制到旧缓存并明确告警——那份副本
+> **不会**被 Claude Code 加载。安装成功后执行 `/reload-plugins` 或重启 Claude Code。
+
+`--dry-run` 会执行同一套源树预检（缺 `templates/`、`references/`、
+`scripts/workflow_check.py` 或类目 description 时非零退出），但只打印计划动作，
+不会声称「安装完成」。Claude Code 侧另有一道 fail-closed：插件已注册但
+`settings.json.enabledPlugins` 无本条时非零退出，并提示先用 `/plugin` 启用
+（或 `/reload-plugins` 后重试），而不是打印成功横幅。预检还会拒绝
+`.claude-plugin/plugin.json` 的 `agents` 字段：Claude Code 要求该字段必须是
+单个 `.md` 路径，目录声明会让整个插件加载失败；363 个专家靠 `agents/`
+目录的约定式扫描注册。
+
+安装后重启所选宿主（Agent 清单在会话启动时加载）。
+
+### uninstall
 
 ```bash
-# 一键安装（推荐）
-npm install -g zcode-expert-system
-zcode-expert-system cc-install
-
-# 或从克隆的源码仓库
-npm install
-npm run cc:install
+zcode-expert-system uninstall
 ```
 
-卸载 Claude Code 侧：
+会弹出同样的多选菜单：
 
-```bash
-zcode-expert-system cc-uninstall   # 全局安装
-npm run cc:uninstall               # 源码仓库
+```text
+ZCode
+Claude Code
+Qoder
 ```
 
-**一键安装脚本封装了四步 CLI 操作**，无需手工执行：
+已检测到的宿主默认预选。按 `Enter` 删除所选插件文件、命令、Agent 和
+Hook/注册信息：
 
-1. 构建本地市场目录 `~/.claude/plugins/marketplaces/zcode-local/`
-   （`marketplace.json` + 完整插件树，含 `skills/zcode-expert-system/` 镜像，让 `/wf:*` 命令的脚本路径可解析）
-2. 注册市场（`claude plugin marketplace add`）
-3. 安装并启用插件（`claude plugin install`）
-4. 验证 `installed_plugins.json` 与 `enabledPlugins` 均已更新
+- **Claude Code**：先注销插件、移除 `zcode-local` 市场注册与目录，再删除本插件的
+  两个缓存子目录（`cache/zcode-local/zcode-expert-system` 与旧版
+  `cache/claude-plugins-official/zcode-expert-system`），不会触碰其他插件缓存。
+  若 `claude` CLI 不可用或命令失败，回退为直接编辑 `installed_plugins.json`、
+  `settings.json.enabledPlugins` 与 `known_marketplaces.json`（只删本插件条目）；
+  注册仍有残留时非零退出，且不打印「卸载完成」。
+- **Qoder**：只删本插件拥有的文件（部署清单；清单丢失时按
+  `<!-- zcode-expert-system:qoder-adapter -->` ownership marker 精确回退）。
+  用户同名命令/子代理一律保留，Hook 只删本插件那一条 entry。备份与运行时
+  context 默认保留，`--purge` 才删除。
+- **ZCode**：严格按清单删除（绝不按前缀扫），覆盖前先备份旧技能目录；
+  `skills/zcode-expert-system.bak-*` 只有**不含用户文件**时才自动清理，
+  含用户自建文件的备份保留并打印路径；`--purge` 才连同这些备份与
+  `~/.zcode/expert-system/context/` 一起删除。
 
-安装后：
-
-- 在 Claude Code 中执行 `/plugin`，应出现 `zcode-expert-system`
-- 派发子代理使用限定名格式：`zcode-expert-system:<专家中文名>`（例如 `zcode-expert-system:后端架构师`）
-- 使用 `/wf:*` 命令调用九阶段工作流
-
-**P5 安装安全契约**（`scripts/install-claude-code.js`）：安装流程是 *预检 → 备份 → 构建 → 失败回滚*：
-
-1. **源树预检** —— `preflightCheck()` 在**删除任何东西之前**校验每个必需源组件
-   （`SKILL.md`、`config/`、`agents/`、`commands/`、`.claude-plugin/`、`hooks/`、`scripts/`）
-   均存在；缺任一组件即中止，报 `[preflight] 源树缺少部署必需组件`。
-2. **删前备份** —— 已存在的市场目录先复制为同级的 `.bak-marketplace-<时间戳>`。
-3. **失败回滚** —— 构建失败时移除半成品目录并还原备份；若回滚本身也失败，打印备份路径供手工恢复。
-
-**未打包组件**：`src/` 声明在 `UNPACKED_COMPONENTS` 中，**不随插件分发**。它承载在建中的
-`openspec/changes/jwt-auth-system` 模块（`src/auth/`），目前尚无生产消费者。
-
-**其它命令：**
-
-```bash
-npm run cc:install:dry      # 预演，不改动任何东西
-npm run cc:install -- --force    # 强制重装
-npm run cc:uninstall        # 卸载（移除注册与市场目录）
-```
-
-> **ZCode 兼容性不受影响。** ZCode 的部署路径和行为与之前完全一致。
-> Claude Code 适配层是纯增量，不修改任何 ZCode 面向的文件。
-
-### 卸载
-
-卸载统一走 `install.js`，用 `--zcode` / `--claude-code` 标志选择卸载哪一侧：
-
-```bash
-node scripts/install.js --uninstall                 # 卸载 ZCode + Claude Code（两者）
-node scripts/install.js --uninstall --zcode         # 只卸载 ZCode
-node scripts/install.js --uninstall --claude-code   # 只卸载 Claude Code
-node scripts/install.js --uninstall --zcode --purge  # 卸载 ZCode 并清除所有残留（含运行时数据）
-```
-
-或用 npm：
-
-```bash
-npm run uninstall         # 两者
-npm run uninstall:zcode   # 只卸 ZCode
-npm run uninstall:claude  # 只卸 Claude Code
-```
-
-**ZCode 侧卸载**：移除插件注册、缓存、技能、命令、子代理、部署清单，并清理
-备份目录（`skills/*.bak-*`）与已空的命令/`expert-system` 目录。
-**用户运行时数据**（`~/.zcode/expert-system/context/`）默认保留，加 `--purge` 连它一起清除。
-
-**Claude Code 侧卸载**：移除插件注册与 `enabledPlugins` 条目、移除市场注册、
-删除本地市场目录。不触碰 ZCode。
-
-建议先跑预演（零写入，展示完整删除计划）：
-
-```bash
-node scripts/install.js --uninstall --dry-run
-```
+非交互终端沿用历史默认：Claude Code + ZCode。
 
 ## ⚙️ 配置说明
 
@@ -379,19 +394,34 @@ node scripts/install.js --uninstall --dry-run
 
 两类降级都在本机完成，无网络依赖，流程不中断。
 
+**运行时上下文按宿主隔离**：
+
+| 宿主 | 上下文目录 |
+|---|---|
+| ZCode | `~/.zcode/expert-system/context/` |
+| Claude Code | `~/.claude/expert-system/context/` |
+| Qoder | `$QODER_HOME/expert-system/context/` |
+
+可用 `ZCODE_EXPERT_CONTEXT_DIR` 覆盖；测试套件每个用例都指向临时目录，
+不会再写入真实用户上下文。
+
+**专家名称可见性**：派发计划包含 `display_name` / `display_label`；主控必须先在
+会话中显示 `正在调用专家：<专家名>`，并给 `Agent` / `Task` 传
+`description = "专家：<专家名>"`。计划、派发单与只读审计锚点都携带同一专家名。
+
 ## 🚀 使用方法
 
 ### 调用专家体系
 
-在 ZCode 会话中直接下达专业任务——`UserPromptSubmit` 钩子会自动注入路由规则，
-技能按领域关键词触发。
+在任意受支持宿主会话（ZCode / Claude Code / Qoder Desktop）中直接下达专业任务——
+`UserPromptSubmit` 钩子会自动注入路由规则，技能按领域关键词触发。
 
 实际存在的入口：
 
 | 入口 | 作用 |
 |---|---|
 | `Skill(zcode-expert-system)` | 以任务描述调用技能 |
-| `/wf:triage <任务>` | 双轴分诊：规模 + 领域路由一次产出（只读/轻量/中任务/大任务/Bug；只读派 analyst） |
+| `/wf:triage <任务>` | 双轴分诊：规模 + 领域路由一次产出（只读/轻量/中任务/大任务/Bug；只读派 analyst，仅查看类工具） |
 | `/wf:plan <任务>` | 生成二维派发计划（角色 × 专家） |
 | `/wf:check` | 对当前变更/计划做机械门禁核对 |
 
@@ -448,23 +478,26 @@ node scripts/install.js --uninstall --dry-run
 
 ## 🤖 已注册子代理
 
-安装后 ZCode 可派发 **363 个子代理**：
+安装后三个宿主均可派发 **363 个子代理**：
 
-| 类型 | 数量 | 位置 | 派发方式 |
-|---|---|---|---|
-| 领域总经理 | 32 | `~/.zcode/agents/manager-*.md` | `Agent(subagent_type="manager-backend-architecture")` |
-| 领域专家 | 331 | `~/.zcode/agents/expert-*.md` | `Agent(subagent_type="后端架构师")` |
+| 宿主 | 总经理 | 专家 | 位置 | 派发方式 |
+|---|---|---|---|---|
+| ZCode | 32 | 331 | `~/.zcode/agents/` | `Agent(subagent_type="后端架构师")` |
+| Claude Code | 32 | 331 | 插件内 `agents/` | `Agent(subagent_type="zcode-expert-system:后端架构师")` |
+| Qoder Desktop | 32 | 331 | `~/.qoder/agents/` | `Agent(subagent_type="后端架构师")` |
 
 > **专家名写错时的表现**：`build_dispatch_for_expert` 找不到精确匹配会抛 `ValueError`，
 > 并在错误信息里给出 difflib 近似候选名，不会静默选一位"差不多"的专家。
 
-> 注意：总经理用 **slug**（`manager-<分类>`）派发，因为 `install.js` 写入部署文件的
+> 注意：总经理用 **slug**（`manager-<分类>`）派发，因为各平台安装链写入部署文件的
 > `name:` 就是 slug；专家用**中文显示名**派发。两者混淆会导致 `Agent` 调用找不到代理。
+> Claude Code 额外使用插件限定名 `zcode-expert-system:<专家名>`。
 
 > `subagent_type` 填**中文显示名**（专家 md 的 `name:` 字段）。
 > 若名字不在会话清单中，回退为读取该专家提示词、代入其人格执行。
 
-⚠️ **改动子代理文件后必须重启 ZCode** —— Agent 清单是会话启动时的快照，中途新增或修改不会生效。
+⚠️ **改动子代理文件后必须重启对应宿主** —— Agent 清单是会话启动时的快照，
+中途新增或修改不会生效。
 
 ## 📁 目录结构
 
@@ -472,7 +505,7 @@ node scripts/install.js --uninstall --dry-run
 zcode-expert-system/
 ├── .zcode-plugin/plugin.json          # 插件清单
 ├── .claude-plugin/plugin.json         # Claude Code 插件清单
-├── SKILL.md                            # ZCode 技能入口
+├── SKILL.md                            # 技能入口（三平台共用）
 ├── README.md / README_CN.md            # 英文 / 中文文档
 ├── zcode_expert_system.py              # 域轴（32 大类 → 331 专家）
 ├── zcode_dev_workflow.py               # 规模轴（分诊 → 阶段 → 派发计划）
@@ -481,9 +514,10 @@ zcode-expert-system/
 ├── src/
 │   └── auth/                           # jwt-auth-system（openspec 在建；不随插件分发 — UNPACKED_COMPONENTS）
 ├── scripts/
-│   ├── install.js                      # ZCode 一键部署 / 卸载脚本
+│   ├── install.js                      # 统一部署 / 卸载（ZCode + Claude + Qoder 目标）
 │   ├── install-claude-code.js          # Claude Code 部署（预检 + 备份 + 回滚）
 │   ├── cc-uninstall.js                 # Claude Code 卸载
+│   ├── install-qoder.js                # Qoder 用户级部署 / 状态 / 卸载
 │   ├── workflow_check.py               # 门禁机械核对（+ --self-check）
 │   ├── openspec_engine.py              # OpenSpec change/规格引擎
 │   ├── llm_client.py                   # LLM 调用辅助
@@ -506,7 +540,7 @@ zcode-expert-system/
 │   └── workflow-fusion-design.md       # 融合设计基线（为什么这样设计）
 ├── context/
 │   └── context-manager.py              # 上下文管理器（数据落 ~/.zcode/expert-system/context/）
-├── tests/                              # 回归测试（pytest，665 passed / 1 skipped）（2026-11-23 词表批次后同步）
+├── tests/                              # 回归测试（pytest，817 passed / 1 skipped）（801 基线 + 9 项三平台部署完整性守卫 + 7 项安装/卸载安全守卫）
 ├── hooks/
 │   ├── hooks.json                      # 钩子配置（ZCode 标准 schema）
 │   ├── claude-hooks.json               # 钩子配置（Claude Code 格式）
@@ -545,7 +579,16 @@ python -c "from zcode_expert_system import zcode_expert_system; print(zcode_expe
 python -m pytest tests/ -q   # 末行必须是 "passed"，0 failed
 ```
 
-期望基线：**665 passed, 1 skipped**（2026-11-23 词表批次后同步）。
+期望基线：**817 passed, 1 skipped** —— 801 条是 v3.2.5 运行时基线
+（Claude 注册 + S1/P3 + 路由批次 1-4 + 派发门禁），另加 9 条三平台部署完整性
+守卫（workflow_check/categories 校验、marketplace 与 Qoder 技能组件、卸载对称性），
+再加 7 条安装/卸载安全守卫（`--zcode` 卸载保留含用户文件的备份、仅 `--purge`
+才删、无 `claude` CLI 时清理幽灵注册、Claude dry-run 预检且不报「安装完成」、
+`enabledPlugins` 缺失即 fail-closed）。
+
+> 817 是**完整开发树**的验证基线。GitHub 运行时发布按你的口径只提交运行时文件，
+> 不新增/更新 `tests/` 与 `docs/`；因此只取运行时文件的 clone 不会复现这个数字。
+> 发布前已在完整开发树上本地跑过全量测试。
 
 > 关于 `src/auth/`：JWT 认证模块（`jwt-auth-system` OpenSpec change）尚在建设中，由
 > `tests/test_auth_login.py` 覆盖。其实现选择是刻意为之：
@@ -564,7 +607,7 @@ python -m pytest tests/ -q   # 末行必须是 "passed"，0 failed
 
 ## 🔗 引用来源与开源依赖
 
-本项目在以下开源项目与能力体系的基础上进行了 ZCode 平台适配与工程化改造：
+本项目在以下开源项目与能力体系的基础上进行了 ZCode / Claude Code / Qoder 平台适配与工程化改造：
 
 | 来源 | 用途 | 项目地址 |
 |---|---|---|
@@ -572,11 +615,11 @@ python -m pytest tests/ -q   # 末行必须是 "passed"，0 failed
 | **Superpowers** | 工程能力体系（brainstorming、writing-plans、sdd、tdd、verification、code-review、finishing 等能力） | 待项目方补充 GitHub 地址 |
 | **OpenSpec** | 规格驱动开发体系（change 提案、规格同步、归档工作流） | 待项目方补充 GitHub 地址 |
 
-本项目在此基础上增加了 ZCode 平台适配与工程化改造：三层路由架构（分类 → 总经理 → 专家）、两轴正交路由（规模轴 + 域轴）、九阶段受控工作流、机械门禁核对、七态状态机、证据分级与冲突裁决。
+本项目在此基础上增加了三平台适配与工程化改造：三层路由架构（分类 → 总经理 → 专家）、两轴正交路由（规模轴 + 域轴）、九阶段受控工作流、机械门禁核对、七态状态机、证据分级与冲突裁决。
 
 ## 🙏 致谢
 
-专家提示词来自 [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents) 开源项目，并在此基础上做了 ZCode 平台适配与工程化改造（三层路由架构、领域总经理任务分解、动态专家派发）。
+专家提示词来自 [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents) 开源项目，并在此基础上做了 ZCode / Claude Code / Qoder 平台适配与工程化改造（三层路由架构、领域总经理任务分解、动态专家派发）。
 
 ## 📞 联系方式
 
@@ -584,4 +627,4 @@ python -m pytest tests/ -q   # 末行必须是 "passed"，0 failed
 
 ---
 
-**ZCode Expert System v3.2.3** - 让 AI 专家协作更智能 🚀
+**ZCode Expert System v3.2.5** - 让 AI 专家协作更智能 🚀

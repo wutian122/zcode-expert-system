@@ -16,7 +16,7 @@ archive **不依赖** merge 完成，但依赖验证 + 审查 + 同步通过。
 ### delta 唯一来源（硬约束）
 
 ```bash
-python scripts/openspec_engine.py status --change <n>
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" status --change <n>
 ```
 
 读取 JSON 输出中的 `artifactPaths.specs.existingOutputPaths` 字段，**只认这个。** 绝不从 `design.md` / `proposal.md` 推断——推断会同步了不该同步的能力。
@@ -29,7 +29,9 @@ python scripts/openspec_engine.py status --change <n>
 | MODIFIED | 保留 delta 未提及的既有场景 |
 | REMOVED | 整块移除 |
 | RENAMED | FROM/TO 对应 |
-| 主 spec 的 `## Purpose` | **权威，不动** |
+| 主 spec 已有 `## Purpose` | **权威，不动** |
+| 新建主 spec 且 delta 有 `## Purpose` | 原样复制 delta Purpose |
+| 新建主 spec 且 delta 无 `## Purpose` | 写明确 TBD 占位（sync 输出 `purpose_placeholder: true`），保证 `validate-specs` 不因刚同步就 invalid |
 | 能力退役 | 须满足边界条件（含 `retire_capabilities: true`），**永不留下空 `## Requirements`** |
 
 第一次主 spec 写入前取一次 `openspec_engine.py instructions specs` 的 rules 快照，失败即停。
@@ -37,7 +39,7 @@ python scripts/openspec_engine.py status --change <n>
 ### 校验
 
 ```bash
-python scripts/openspec_engine.py validate-specs
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" validate-specs
 ```
 
 幂等。调用方收窄的 delta 子集不得再扩大。
@@ -78,7 +80,7 @@ python scripts/openspec_engine.py validate-specs
 
 ### 完成度口径
 
-只认 `python scripts/openspec_engine.py list` 输出的任务完成数（`tasks.md` 的 `- [x]` / `- [X]`），**仅 `x`/`X` 算完成**，空框 `[ ]` 与异形标记（`[~]` 等）一律算未完成。
+只认 `python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" list` 输出的任务完成数（`tasks.md` 的 `- [x]` / `- [X]`），**仅 `x`/`X` 算完成**，空框 `[ ]` 与异形标记（`[~]` 等）一律算未完成。
 
 ### 归档动作
 
@@ -130,7 +132,8 @@ python scripts/openspec_engine.py validate-specs
 | MODIFIED | 保留 delta 未提及的既有场景 |
 | REMOVED | 整块移除 |
 | RENAMED | FROM/TO 对应 |
-| 主 spec 的 `## Purpose` | 权威不动 |
+| 主 spec 已有 `## Purpose` | 权威不动 |
+| 新建主 spec | 复制 delta Purpose；没有则写明确 TBD 占位 |
 | 能力退役 | 须满足边界条件，永不留下空 `## Requirements` |
 
 ### 手工执行归档（archive-change）

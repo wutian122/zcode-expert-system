@@ -202,6 +202,27 @@ READONLY_CONTEXT = (
     "对比", "比较", "调研", "排查一下原因", "诊断", "审计",
 )
 
+# 解释/科普意图：这些任务在「讲一个概念」，不是「修一个故障」。
+# 用途仅限规模轴：抑制「纯现象陈述」单独成案，避免
+# 「说明 Bug/失败 的判定」被判成 Bug 修复。
+EXPLAIN_INTENT_WORDS = (
+    "说明", "解释", "介绍", "科普", "对比", "是什么", "区别", "定义",
+    "含义", "只读", "讲解", "怎么理解",
+)
+
+# 成对引号：引号内的短标签/名词通常是「被讨论的对象」，不是任务信号。
+# 例如「说明 "Bug/失败" 的判定」里的 Bug/失败 是标签枚举。
+META_QUOTE_PAIRS = (
+    ('"', '"'), ("'", "'"), ("“", "”"), ("‘", "’"),
+    ("「", "」"), ("『", "』"), ("《", "》"), ("`", "`"),
+)
+# 引号内若含实施动词，说明它是真实任务对象（如「修复「登录页」白屏」），
+# 不得剥离——否则会把真正的故障对象一起清掉。
+META_PROTECT_VERBS = (
+    "修复", "修一下", "修下", "实现", "增加", "新增", "添加", "删除",
+    "修改", "调整", "改", "写", "做", "搭建", "建设",
+)
+
 # 大任务信号：即使文件数少也升级
 LARGE_SIGNALS = (
     "架构", "数据模型", "公共 api", "公共接口", "跨模块", "底层",
@@ -319,6 +340,36 @@ def _chinese_word_hit(signal, text):
     return False
 
 
+def _is_explain_intent(text):
+    """任务是否在解释/说明一个概念，而不是修复一个故障。"""
+    return any(w in (text or "") for w in EXPLAIN_INTENT_WORDS)
+
+
+def _strip_meta_spans(text):
+    """剥离「被讨论的短标签」：引号内 ≤12 字且不含实施动词时替换为空格。
+
+    真实故障对象会带实施动词（`修复「登录页」白屏`），因此保留；
+    `说明 “Bug/失败” 的判定` 里的标签枚举会被清掉。
+    代码块整体视为示例，不参与规模信号。
+    """
+    t = text or ""
+    t = re.sub(r"```.*?```", " ", t, flags=re.S)
+    for left, right in META_QUOTE_PAIRS:
+        pattern = re.compile(
+            re.escape(left) + r"([^" + re.escape(right) + r"\n]{1,12})"
+            + re.escape(right)
+        )
+
+        def repl(m):
+            inner = m.group(1)
+            if any(v in inner for v in META_PROTECT_VERBS):
+                return m.group(0)
+            return " "
+
+        t = pattern.sub(repl, t)
+    return t
+
+
 def classify_scale(task_description, file_count=None):
     """规模轴分诊。
 
@@ -340,6 +391,7 @@ def classify_scale(task_description, file_count=None):
     # 把「修复」切成「修」「复」，导致写动作信号漏判、Bug 被误落只读。
     # 覆盖 ZWSP/ZWJ/ZWNJ/LRM/RLM/BOM/软连字符等常见不可见字符。
     text = re.sub(r"[​-‏⁠-⁤﻿­]", "", text)
+    text = _strip_meta_spans(text)
     wf = load_workflow()
     scales = wf["scale"]
     reasons = []
@@ -369,6 +421,7 @@ def classify_scale(task_description, file_count=None):
 
     independent_ctx = [s for s in bug_ctx_hits if s not in bug_hits]
     independent_strong = [s for s in strong_hits if s not in bug_hits]
+    explain_intent = _is_explain_intent(text)
 
     # 现象词的判据（三层，见 _has_failure_marker / _phenomenon_as_nominal）：
     #   ① 有完成态/持续态旁证 → 算故障（`页面白屏了`）
@@ -404,7 +457,10 @@ def classify_scale(task_description, file_count=None):
             r"(?:无法|不能).{4,}?(?:功能|校验|规则|逻辑|页面|模块|流程)\s*$", text):
         phenomenon_backed = [s for s in phenomenon_backed if s not in ability_hits]
 
-    if bug_hits and (independent_ctx or independent_strong or phenomenon_backed):
+    if bug_hits and (
+            independent_ctx
+            or independent_strong
+            or (phenomenon_backed and not explain_intent)):
         # 新功能语境占优且无独立强故障/无旁证 → 不判 Bug，按改动处理。
         if feature_ctx_hits and not (independent_strong or phenomenon_backed):
             reasons.append(
@@ -446,11 +502,16 @@ def classify_scale(task_description, file_count=None):
         feat_pos = min(text.find(v) for v in feature_ctx_hits if text.find(v) != -1)
         feature_first = feat_pos < fix_pos
     if fix_hits and bug_hits and not feature_first:
-        reasons.append(
-            "命中显式修复动作（%s）与故障信号（%s）→ 判 Bug"
-            % ("、".join(fix_hits[:3]), "、".join(bug_hits[:3]))
-        )
-        return _build("bug", scales, wf, reasons)
+        # 自证剔除：`修复` 本身既是修复动作又是 BUG_SIGNALS 成员，
+        # 不能自己给自己提供「故障信号」。必须存在第二个故障信号
+        # （如 bug / 失败 / 报错），否则「修复 README 错别字」会被误判 Bug。
+        other_bug_hits = [s for s in bug_hits if s not in fix_hits]
+        if other_bug_hits:
+            reasons.append(
+                "命中显式修复动作（%s）与故障信号（%s）→ 判 Bug"
+                % ("、".join(fix_hits[:3]), "、".join(other_bug_hits[:3]))
+            )
+            return _build("bug", scales, wf, reasons)
 
     # --- 1b. 纯现象陈述：有强故障词/有旁证的现象词，且无新功能语境 ---
     #
@@ -461,7 +522,7 @@ def classify_scale(task_description, file_count=None):
     # 判据保守：必须命中 STRONG_BUG（无可歧义的完成态词），或
     # 现象词 + 故障旁证；且不得有新功能语境。
     pure_signal = strong_hits or phenomenon_backed
-    if pure_signal and not feature_ctx_hits:
+    if pure_signal and not feature_ctx_hits and not explain_intent:
         reasons.append(
             "纯现象陈述：命中强故障词/现象旁证（%s）且无新功能语境 → 判 Bug"
             % "、".join(sorted(set(strong_hits + phenomenon_backed))[:4])
@@ -485,8 +546,20 @@ def classify_scale(task_description, file_count=None):
     HARD_WRITE = ("实现", "开发", "重构", "改", "加", "创建", "新建", "删除",
                   "修复", "迁移", "升级", "替换", "接入", "配置", "写")
     hard_write_hits = [s for s in HARD_WRITE if s in text]
+    # 解释意图只抑制「被解释的动词」，不能吞掉真正的实施动作。
+    # 位置优先：`说明修复流程`（说明在前 → 只读） vs
+    # `修改登录逻辑，并解释原因`（修改在前 → 仍是写任务）。
+    explain_pos = min((text.find(w) for w in EXPLAIN_INTENT_WORDS
+                       if text.find(w) != -1), default=None)
+    hard_pos = min((text.find(w) for w in hard_write_hits
+                    if text.find(w) != -1), default=None)
+    explain_only = (
+        explain_intent
+        and (hard_pos is None or (explain_pos is not None and explain_pos < hard_pos))
+    )
+    effective_hard_write = [] if explain_only else hard_write_hits
 
-    if readonly_hits and not hard_write_hits:
+    if readonly_hits and not effective_hard_write:
         reasons.append(
             "只读语境（%s）且无硬写动作 → 判只读"
             % "、".join(readonly_hits[:3])
@@ -608,6 +681,10 @@ def _phenomenon_as_nominal(text):
         # 而它其实是「已经挂了，需要自动重启」的故障响应需求。
         "重试", "上报", "埋点", "告警", "分析", "校验",
         "时时间", "时长", "阈值", "上限", "下限",
+        # 元语言名词：`失败场景` / `Bug 与失败的区别` / `失败的判定标准`
+        # 是在讨论概念，不是故障陈述。
+        "场景", "用例", "分类", "类型", "枚举", "区别", "定义",
+        "含义", "说明", "判定",
         # 配置谓词：`超时时间为 30 秒` —— `超时` 后跟「时间」再跟「为」，
         # 属于「设置某个值」的表述，不是故障。
         "时间", "秒", "毫秒", "分钟",
@@ -744,7 +821,12 @@ def _route_domain(task_description, persist=True):
             "manager_id": route.get("manager_id"),
             "expert_name": expert.get("name"),
             "expert_id": expert.get("id"),
+            "display_name": expert.get("name"),
+            "display_label": (
+                "专家：%s" % expert.get("name") if expert.get("name")
+                else "专家：未选定"),
             "confidence": route.get("confidence"),
+            "confidence_detail": route.get("confidence_detail"),
             "alternatives": route.get("alternatives"),
             "semantic_selection_required": route.get("semantic_selection_required"),
             "selection_basis": route.get("selection_basis"),
@@ -778,15 +860,18 @@ def _route_domain(task_description, persist=True):
         }, None
 
 
-def _write_dispatch_artifact(plan):
+def _write_dispatch_artifact(plan, root=None):
     """readonly 域路由成功时落盘 dispatch.json（裁决 2：文件级审计锚点）。
 
-    位置：.superpowers/sdd/dispatch-<YYYYMMDD-HHMMSS+微秒>/dispatch.json
+    位置：<项目根>/.superpowers/sdd/dispatch-<YYYYMMDD-HHMMSS+微秒>/dispatch.json
     （时间戳带微秒——同秒并发任务不互覆）。内容固定十字段（design §6）。
     只在「readonly + 域路由成功 + 专家已选」时写；conf=0 / 路由异常不写
     （那两种情形的 blocking 已记录原因）。
     M-3（修复轮 1）：payload 先于建目录构造——缺键异常不会留下半写目录。
     写盘失败不阻断派发计划生成——审计锚点不是派发前置条件，但留痕不静默。
+
+    root 必须指向老板项目根，而不是插件/技能安装目录；None 时回退 cwd，
+    兼容既有库调用。部署后安装目录可能只读或会被重装删除。
     """
     try:
         payload = {
@@ -797,21 +882,90 @@ def _write_dispatch_artifact(plan):
             "expert_id": plan["domain"].get("expert_id"),
             "subagent_type": _qualified_subagent_type(
                 plan["domain"].get("expert_name")),
+            "display_name": plan["domain"].get("expert_name"),
+            "display_label": (
+                "专家：%s" % plan["domain"].get("expert_name")
+                if plan["domain"].get("expert_name") else "专家：未选定"),
             "role": "analyst",
             "confidence": plan["domain"].get("confidence"),
             "selection_basis": plan["domain"].get("selection_basis"),
             "generated_at": datetime.now().isoformat(),
         }
+        project_root = os.path.abspath(root or os.getcwd())
+        sdd_root = os.path.join(project_root, ".superpowers", "sdd")
         ts = datetime.now().strftime("%Y%m%d-%H%M%S%f")
-        dispatch_dir = os.path.join(BASE_DIR, ".superpowers", "sdd",
-                                    "dispatch-%s" % ts)
+        dispatch_dir = os.path.join(sdd_root, "dispatch-%s" % ts)
         os.makedirs(dispatch_dir, exist_ok=True)
+        # 审计锚点是运行时产物，不应污染用户 git status。
+        gitignore = os.path.join(sdd_root, ".gitignore")
+        if not os.path.exists(gitignore):
+            with io.open(gitignore, "w", encoding="utf-8") as f:
+                f.write("*\n")
         path = os.path.join(dispatch_dir, "dispatch.json")
         with io.open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
-        plan["domain"]["dispatch_artifact"] = os.path.relpath(path, BASE_DIR)
+        plan["domain"]["dispatch_artifact"] = os.path.relpath(path, project_root)
     except OSError as exc:
         plan["domain"]["dispatch_artifact_error"] = str(exc)
+
+
+READONLY_TOOL_POLICY = {
+    "mode": "readonly",
+    "allowed": [
+        "Read", "Grep", "Glob", "SearchWorkspace", "SearchKnowledge",
+        "WebFetch", "WebSearch",
+        "只读 Bash（rg / ls / git status / git log / git diff / git show）",
+    ],
+    "denied": [
+        "Write", "Edit", "NotebookEdit", "ImageGen", "VideoGen",
+        "删除 / 移动 / 复制文件",
+        "mkdir / touch / chmod / sed -i / tee",
+        "shell 重定向写盘（> / >>）",
+        "git add / commit / checkout / reset / restore / clean / stash / push",
+        "npm install / pip install / 任何依赖安装或升级",
+        "发布、发消息、写外部系统",
+        "派发可写的 implementer / reviewer",
+    ],
+    "rule": "只读任务只能查看、搜索、读取、分析；不得新增、删除、修改任何文件或改变系统状态。",
+}
+
+P3_EVIDENCE_BY_SCALE = {
+    "readonly": {
+        "required": False,
+        "reason": "只读任务不写代码；dispatch.json 是审计锚点，分析结论留在会话内",
+    },
+    "light": {
+        "required": True,
+        "primary": "计划文档 ## Baseline / ## Review / ## Rulings / ## Integration Verification",
+    },
+    "medium": {
+        "required": True,
+        "primary": "计划文档 ## Baseline / ## Review / ## Rulings / ## Integration Verification",
+    },
+    "large": {
+        "required": True,
+        "primary": "计划文档 ## Baseline / ## Review / ## Rulings / ## Integration Verification",
+    },
+    "bug": {
+        "required": True,
+        "primary": "计划文档 ## Bug Investigation",
+        "also": "计划文档 ## Baseline / ## Review / ## Rulings / ## Integration Verification",
+        "key_evidence": [
+            "入口分诊", "根因调查（9 问）", "假设三段",
+            "分级 + 方案（≥2 套）", "副作用自查", "双确认",
+            "TDD RED 证据", "red-green 四段复验", "全量回归",
+        ],
+    },
+}
+
+
+def _p3_evidence_for(scale_key):
+    """按规模返回 P3 证据契约；副本避免调用方改到模块常量。"""
+    base = P3_EVIDENCE_BY_SCALE.get(scale_key, P3_EVIDENCE_BY_SCALE["medium"])
+    out = {}
+    for k, v in base.items():
+        out[k] = list(v) if isinstance(v, list) else v
+    return out
 
 
 def build_dispatch_plan(task_description, scale=None, files=None, root=None):
@@ -846,7 +1000,15 @@ def build_dispatch_plan(task_description, scale=None, files=None, root=None):
         # 显式暴露，否则消费方无法判断「这次交付的证据链是什么形态」。
         "git": has_git,
         "evidence_mode": "diff(BASE..HEAD)" if has_git else "snapshot(sha256 差集)",
+        # P3 证据契约：读到 plan 的人不需要再猜「这次要不要落盘、落到哪」。
+        # readonly 不需要 P3；Bug 额外要求 ## Bug Investigation。
+        "p3_evidence": _p3_evidence_for(scale["scale"]),
     }
+    if scale["scale"] == "readonly":
+        plan["tool_policy"] = {
+            k: (list(v) if isinstance(v, list) else v)
+            for k, v in READONLY_TOOL_POLICY.items()
+        }
 
     # --- 域轴路由（W10 两轴强制：全规模必做，readonly 不再 early return） ---
     # I2 接线（Task 3）：readonly 路由传 persist=False——只读分析不写
@@ -884,12 +1046,14 @@ def build_dispatch_plan(task_description, scale=None, files=None, root=None):
                     "backend-architecture。"
                     % domain.get("selection_basis"),
         })
-        # P1-6：setdefault——degraded 分支已置的更具体 blocking（路由失败
-        # 具体错误）优先，不在此覆盖；语义精判仍作为 dispatch 动作执行。
-        plan.setdefault("blocking", (
-            "语义精判待完成（semantic_selection_required=true）："
-            "不得直接采信 domain.expert_name。复核后删除本字段再派发。"
-        ))
+        # 高置信度只要求复核，不再制造 blocking；低置信度由下面的分支
+        # 置 blocking 并阻断派发。blocking 与派发行并存是旧契约的自相矛盾。
+        plan["semantic_recheck"] = {
+            "required": True,
+            "reason": "heuristic_selection",
+            "confidence": domain.get("confidence"),
+            "confidence_detail": domain.get("confidence_detail"),
+        }
 
     # --- 只读任务：按域路由结论派 analyst（D3/D6；旧「不分派」契约已删） ---
     #
@@ -935,17 +1099,29 @@ def build_dispatch_plan(task_description, scale=None, files=None, root=None):
                 % (domain.get("confidence") or 0, LOW_CONFIDENCE_THRESHOLD,
                    expert_name)
             ))
+            plan["clarify_options"] = (
+                [{"category": domain.get("category"), "expert": expert_name}]
+                + [{"category": c, "expert": None}
+                   for c in (domain.get("alternatives") or [])]
+            )
         elif expert_name:
             # 域路由成功 + 专家已选 → 派 analyst + 落盘 dispatch.json（裁决 2）
             plan["dispatches"].append({
                 "role": "analyst",
                 "subagent_type": _qualified_subagent_type(expert_name),
+                "display_name": expert_name,
+                "display_label": f"专家：{expert_name}",
                 "prompt_prefix": _role_contract_prefix("analyst"),
-                "note": "只读分析：禁改文件；结论按「现象→原因→影响→建议」四段式"
+                "tool_policy": {
+                    k: (list(v) if isinstance(v, list) else v)
+                    for k, v in READONLY_TOOL_POLICY.items()
+                },
+                "note": "只读分析：仅允许查看/搜索/读取类工具；禁止新增、删除、修改"
+                        "任何文件或改变系统状态。结论按「现象→原因→影响→建议」四段式"
                         "并带 file:line/URL 证据；领域判断由 analyst 承担，"
                         "不得留待主控",
             })
-            _write_dispatch_artifact(plan)
+            _write_dispatch_artifact(plan, root=root)
         elif not domain.get("degraded"):
             # 域路由正常但无专家（conf=0 或无匹配）→ blocking 两档文案（I6/#2）。
             # 不做机械闲聊判定：两档并存陈述，归类交主控按语境判断。
@@ -981,6 +1157,8 @@ def build_dispatch_plan(task_description, scale=None, files=None, root=None):
         plan["dispatches"].append({
             "role": "implementer",
             "subagent_type": _qualified_subagent_type(implementer_type),
+            "display_name": implementer_type,
+            "display_label": f"专家：{implementer_type}",
             "prompt_prefix": _role_contract_prefix("implementer"),
             "note": "实施者禁止派子代理；不得超出 brief 范围",
         })
@@ -991,6 +1169,8 @@ def build_dispatch_plan(task_description, scale=None, files=None, root=None):
         plan["dispatches"].append({
             "role": "implementer",
             "subagent_type": "general-purpose",
+            "display_name": "通用执行代理",
+            "display_label": "代理：通用执行代理",
             "prompt_prefix": _role_contract_prefix("implementer"),
             "note": "域路由未产出领域专家（conf=%s）：实施降级为 general-purpose "
                     "仅承接机械执行；领域结论禁由通用代理产出，"
@@ -1027,16 +1207,25 @@ def build_dispatch_plan(task_description, scale=None, files=None, root=None):
             "或用 build_dispatch_for_expert(专家名, 任务) 指定后重跑。"
             % (domain.get("confidence") or 0, LOW_CONFIDENCE_THRESHOLD)
         ))
+        plan["clarify_options"] = (
+            [{"category": domain.get("category"), "expert": implementer_type}]
+            + [{"category": c, "expert": None}
+               for c in (domain.get("alternatives") or [])]
+        )
 
     # Reviewer：独立性由实际配对 + git 状态推导（含理由，便于账本记录）
     # 低置信度被阻断时无实施者，无需审查者（语义精判段的 semantic_recheck
     # 动作已覆盖主控复核动作）。
     if not low_conf_heuristic:
         reviewer_type, independence, independence_reason = _pick_reviewer(
-            implementer_type, has_git=has_git)
+            implementer_type,
+            has_git=has_git,
+            implementer_category=domain.get("category"))
         plan["dispatches"].append({
             "role": "reviewer",
             "subagent_type": _qualified_subagent_type(reviewer_type),
+            "display_name": reviewer_type,
+            "display_label": f"专家：{reviewer_type}",
             "independence": independence,
             "independence_reason": independence_reason,
             "prompt_prefix": _role_contract_prefix("reviewer"),
@@ -1094,28 +1283,29 @@ def detect_git(start=None):
         cur = parent
 
 
-def _pick_reviewer(implementer_type, has_git=True):
+def _pick_reviewer(implementer_type, has_git=True, implementer_category=None):
     """选审查者并给出**由实际配对 + git 状态推导**的独立性级别与理由。
 
     返回 (reviewer_type, independence, reason)。
 
     独立性级别语义（与 workflow_check.py 的 L2 拦截对齐）：
-      L0 独立子代理审查 —— 审查者是独立派发的专家，类型 ≠ 实施者，
-                            且变更集有可信来源（git diff）
-      L1 主控自审降级   —— 无 git（只有文件快照，变更集由主控自算），
-                            或实施者缺失/降级，独立性只能靠「实例隔离 + 输入隔离」保证
+      L0 独立子代理审查 —— 审查者独立派发、类型不同，且所属 category 也
+                            不同于实施者（异域）；变更集有可信来源（git diff）
+      L1 主控自审降级   —— 无 git、实施者缺失，或无法证明异域
       L2 无审查         —— 不会由本函数产出；仅在完全跳过审查时由调用方标记
 
-    旧实现三个分支全部 `return ..., "L0"`，导致账本里的 independence 恒为 L0，
-    workflow_check 的 L2 拦截永不触发，独立性降级形同无标记。
-
-    **has_git 参数（缺陷 #25）**：W7 规定「git 探测失败走快照证据 + 主控自审（记 L1）」。
-    无 git 时变更集由主控自己算（sha256 差集），审查者拿到的「变更集」是
-    主控加工过的产物，不是原始 diff——按定义就不构成完全独立的审查，
-    必须标 L1 并在交付中声明。恒输出 L0 会让这条纪律完全不可见。
+    文档要求 Reviewer 是「异域专家」。旧实现只比较专家名，导致
+    实施者为 engineering-quality（代码审查员/最小变更工程师）时，
+    审查者仍来自同一 category，却标 L0。这里在能拿到实施者 category 时
+    强制选择不同 category 的审查者；无法证明时降为 L1。
     """
     primary = "代码审查员"
-    alternates = ["最小变更工程师", "软件架构师"]
+    primary_cat = "engineering-quality"
+    alternates = [
+        ("最小变更工程师", "engineering-quality"),
+        ("软件架构师", "backend-architecture"),
+        ("安全架构师", "security-compliance"),
+    ]
 
     # 无 git：变更集无可靠来源，独立性按 W7 降为 L1（优先于配对判断——
     # 因为这是「证据形态」的缺陷，不是「人选配对」的缺陷）
@@ -1134,24 +1324,32 @@ def _pick_reviewer(implementer_type, has_git=True):
             "无从校验域级独立性；主控需人工确认审查有效性"
         )
 
-    # 实施者本身就是首选审查专家 → 换备选，保证类型不同（I1）
-    if implementer_type == primary:
-        return alternates[0], "L0", (
-            "实施者为「%s」，改用「%s」保证审查者类型不同（I1）"
-            % (implementer_type, alternates[0])
-        )
+    def different_domain(candidate, candidate_cat):
+        if implementer_category:
+            return candidate != implementer_type and candidate_cat != implementer_category
+        return candidate != implementer_type
 
-    # 实施者是备选审查专家 → 用首选，仍需类型不同
-    if implementer_type in alternates:
+    # 首选审查者满足「类型不同 + 异域」→ 直接用。
+    if different_domain(primary, primary_cat):
         return primary, "L0", (
-            "实施者为「%s」，改用「%s」保证审查者类型不同（I1）"
-            % (implementer_type, primary)
+            "审查者「%s」(%s) 与实施者「%s」(%s) 异域且独立派发"
+            % (primary, primary_cat, implementer_type, implementer_category or "unknown")
         )
 
-    # 常规情形：首选审查专家与实施者不同，独立派发即为 L0
-    return primary, "L0", (
-        "审查者「%s」与实施者「%s」类型不同且独立派发（I1+I2+I3 满足）"
-        % (primary, implementer_type)
+    # 首选同域 → 从备选中挑第一个异域且非同一专家者。
+    for candidate, category in alternates:
+        if different_domain(candidate, category):
+            return candidate, "L0", (
+                "实施者「%s」(%s) 与首选审查者同域；改用「%s」(%s) 保证异域审查"
+                % (implementer_type, implementer_category or "unknown",
+                   candidate, category)
+            )
+
+    # 所有候选都无法证明异域（或 expert 清单信息不足）。
+    return primary, "L1", (
+        "无法证明审查者与实施者异域（implementer_category=%s）；"
+        "按 L1 声明降级，交付时须显式说明"
+        % (implementer_category or "unknown")
     )
 
 
@@ -1171,6 +1369,11 @@ def _role_contract_prefix(role):
             "每条结论必须带 file:line/URL 证据；"
             "输出固定四段式「现象→原因→影响→建议」（可选附加「未解疑点」段）；"
             "领域判断由 analyst 承担，不得留待主控。\n"
+            "【只读工具权限】允许 Read/Grep/Glob/SearchWorkspace/SearchKnowledge/"
+            "WebFetch/WebSearch 与只读 shell（rg/ls/git status/log/diff/show）；"
+            "严禁 Write/Edit/NotebookEdit、删除/移动/复制、mkdir/touch/chmod/sed -i、"
+            "shell 重定向写盘、git add/commit/checkout/reset/restore/clean/stash/push、"
+            "安装依赖、发布或写外部系统。只读任务不得新增、删除、修改任何文件。\n"
         ),
         "reviewer": (
             "【审查者约束】只读，不得改文件；不采信实施者自评（只作待验证主张）；"
@@ -1252,7 +1455,8 @@ def _main(argv):
         # 双轴合一（D2）：主控拿规模结论必须同时接受域路由。
         # 文本形态在三锚点①约束下输出：首行「任务分类结果」锚点不动，
         # 紧随其后追加领域路由两行。
-        domain, _impl = _route_domain(task)
+        domain, _impl = _route_domain(
+            task, persist=(res["scale"] != "readonly"))
         res["domain"] = domain
         if json_out:
             print(json.dumps(res, ensure_ascii=False, indent=2))

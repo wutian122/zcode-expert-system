@@ -59,10 +59,28 @@
 
 ## Dispatches
 
-<!-- 每次派发一行，格式固定。这是根因回溯的唯一索引。 -->
-<!-- dispatch <task> role=<Role> agent="<专家名>" category=<域> instance=<N> base=<标识> brief=<path> report=<path> changeset=<path> -->
-<!-- readonly/analyst 派发例（无 report/changeset，产物在会话内）：
-     dispatch 任务分析 role=analyst agent="软件架构师" category=backend-architecture instance=1 base=- brief=- report=- changeset=- -->
+> **必填。** 每派发一次写一行，格式固定——这是根因回溯与「谁实施、谁审查」的
+> 唯一索引。**没写派发行 = 没派发**：`workflow_check` 不认会话记忆，只认这里的行。
+>
+> - 完成的任务找不到对应的 `role=implementer` 行 → `S5.DISPATCH_IMPLEMENTER` FAIL
+> - 有 `task-N-report.md` 却没有该任务的 implementer 行 → `S5.DISPATCH_ORPHAN_REPORT` FAIL
+> - `independence: L0` 却找不到 `role=reviewer` 行 → `S6.L0_REQUIRES_DISPATCH` FAIL
+> - `agent` 必须是 `config/experts.json` 里的专家名，`category` 必须与注册表一致
+> - **主控不得把自己写成 implementer 或 reviewer**（自己实施/自审不得标 L0）
+> - 示例写在下面的围栏里：**围栏与注释内的行不算证据**（脚本会剥掉）
+
+```text
+dispatch <task> role=<Role> agent="<专家名>" category=<域> instance=<N> base=<标识> brief=<path> report=<path> changeset=<path>
+
+# 实施者行（完成任务必填）
+dispatch 1 role=implementer agent="软件架构师" category=backend-architecture instance=1 base=a1b2c3d brief=.superpowers/sdd/my-plan/task-1-brief.md report=.superpowers/sdd/my-plan/task-1-report.md changeset=.superpowers/sdd/my-plan/review-1.diff
+
+# 审查者行（L0 必填；agent 必须 ≠ 实施者）
+dispatch 1 role=reviewer agent="代码审查员" category=engineering-quality instance=1 base=a1b2c3d brief=.superpowers/sdd/my-plan/task-1-brief.md report=.superpowers/sdd/my-plan/review-1.md changeset=.superpowers/sdd/my-plan/review-1.diff
+
+# readonly/analyst 派发（无 report/changeset，产物在会话内；仅查看类工具，禁止增删改）
+dispatch 任务分析 role=analyst agent="软件架构师" category=backend-architecture instance=1 base=- brief=- report=- changeset=-
+```
 
 ## Fix Rounds
 

@@ -1,24 +1,15 @@
 {
   "name": "zcode-expert-system",
-  "version": "3.2.3",
-  "description": "ZCode Expert System v3.2 - 331 experts in 32 categories with two-axis routing (scale -> nine-stage workflow, domain -> expert). OpenSpec + Superpowers + multi-agent + TDD fusion.",
+  "version": "3.2.5",
+  "description": "ZCode Expert System v3.2 - 331 experts in 32 categories with two-axis routing (scale -> nine-stage workflow, domain -> expert) for ZCode, Claude Code and Qoder Desktop. OpenSpec + Superpowers + multi-agent + TDD fusion.",
   "icon": "https://cdn.jsdelivr.net/gh/wutian122/zcode-expert-system@main/icon.png",
   "main": "bin/cli.js",
   "bin": {
     "zcode-expert-system": "bin/cli.js"
   },
-  "scripts": {
-    "deploy": "node scripts/install.js",
-    "deploy:dry": "node scripts/install.js --dry-run",
-    "uninstall": "node scripts/install.js --uninstall",
-    "uninstall:zcode": "node scripts/install.js --uninstall --zcode",
-    "uninstall:claude": "node scripts/install.js --uninstall --claude-code",
-    "cc:install": "node scripts/install-claude-code.js",
-    "cc:install:dry": "node scripts/install-claude-code.js --dry-run",
-    "cc:uninstall": "node scripts/install-claude-code.js --uninstall"
-  },
   "keywords": [
     "zcode",
+    "qoder",
     "plugin",
     "expert-system",
     "ai",
@@ -38,6 +29,7 @@
     "scripts/install.js",
     "scripts/install-claude-code.js",
     "scripts/cc-uninstall.js",
+    "scripts/install-qoder.js",
     "scripts/target-menu.js",
     "scripts/openspec_engine.py",
     "scripts/workflow_check.py",

@@ -1,7 +1,7 @@
 {
   "name": "zcode-expert-system",
   "description": "ZCode Expert System v3.2 - 331 experts in 32 top-level categories with two-axis routing (scale -> nine-stage workflow, domain -> expert). Fuses OpenSpec + Superpowers + multi-agent + TDD.",
-  "version": "3.2.3",
+  "version": "3.2.5",
   "author": { "name": "wutian122" },
   "license": "MIT",
   "repository": "https://github.com/wutian122/zcode-expert-system",

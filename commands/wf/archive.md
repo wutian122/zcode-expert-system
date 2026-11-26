@@ -18,14 +18,14 @@ archive **不依赖** merge 完成，但依赖验证 + 审查 + 同步通过。
 ### delta 唯一来源（硬约束）
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py" status --change <n>
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" status --change <n>
 ```
 
 读 JSON 输出的 `artifactPaths.specs.existingOutputPaths` 字段。**只认这个。** 绝不从 `design.md` / `proposal.md` 推断——推断会同步了不该同步的能力。
 
 > **无 jq 也能用**：上面的命令直接输出 JSON，用 Python 一行内联即可提取字段（不依赖 jq）：
 > ```bash
-> python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py" status --change <n> \
+> python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" status --change <n> \
 >   | python -c "import json,sys; d=json.load(sys.stdin); print('\n'.join(d.get('artifactPaths',{}).get('specs',{}).get('existingOutputPaths',[])))"
 > ```
 
@@ -40,10 +40,10 @@ python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scr
 | 主 spec `## Purpose` | **权威，不动** |
 | 能力退役 | 须满足边界条件（含 `retire_capabilities: true`），**永不留下空 `## Requirements`** |
 
-首次写主 spec 前取一次 `python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py" instructions specs` rules 快照，失败即停。
+首次写主 spec 前取一次 `python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" instructions specs` rules 快照，失败即停。
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py" validate-specs
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" validate-specs
 ```
 
 幂等。调用方收窄的 delta 子集不得再扩大。
@@ -79,7 +79,7 @@ ADDED 在 / MODIFIED 带新场景且旧场景在 / REMOVED 消失 / 退役能力
 
 ### 完成度口径
 
-只认 `python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py" list` 输出的任务完成数（`tasks.md` 的 `- [x]` / `- [X]`），**仅 `x`/`X` 算完成**，空框与 `[~]` 等异形标记一律算未完成。
+只认 `python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" list` 输出的任务完成数（`tasks.md` 的 `- [x]` / `- [X]`），**仅 `x`/`X` 算完成**，空框与 `[~]` 等异形标记一律算未完成。
 
 ### 动作
 
@@ -100,7 +100,7 @@ ADDED 在 / MODIFIED 带新场景且旧场景在 / REMOVED 消失 / 退役能力
 - [ ] 七条件逐条为真
 - [ ] `completedTasks == totalTasks`（只认 x/X）
 - [ ] delta 逐能力复验通过
-- [ ] `python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/openspec_engine.py" validate-specs` 通过
+- [ ] `python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" validate-specs` 通过
 - [ ] 归档目录存在且日期未叠
 - [ ] `openspec/` 下无未提交制品
 
@@ -108,4 +108,4 @@ ADDED 在 / MODIFIED 带新场景且旧场景在 / REMOVED 消失 / 退役能力
 
 **不得为了清理目录而提前归档。** 归档是诚实记录，不是收尾动作。
 
-核对：`${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/workflow_check.py --change <n> --scale <scale>`
+核对：`${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/workflow_check.py --change <n> --plan <plan.md> --scale <scale>`

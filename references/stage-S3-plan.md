@@ -11,6 +11,10 @@
 
 产出 `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`
 
+> **Bug 任务额外要求**：计划必须有 `## Bug Investigation` 段，记录入口分诊、
+> 9 问根因、假设三段、分级方案、副作用自查、双确认、RED、red-green 四段
+> 复验与全量回归。该段是 P3 证据，不能只留在会话或 P4 workspace。
+
 ### 必备头部
 
 ```markdown
@@ -56,6 +60,7 @@
 ## 退出条件（G3）
 
 - [ ] 必备段齐全
+- [ ] **Bug 规模：`## Bug Investigation` 段齐全，且含入口/根因/假设/方案/双确认/RED/red-green/全量回归**
 - [ ] `grep -c "^### Task " <plan>` 与 tasks.md 叶子数对齐（1 Task ≥ 1 叶子）
 - [ ] 无占位符：TBD / TODO / "适当的错误处理" / "同 Task N"
 - [ ] Self-Review 五项全过

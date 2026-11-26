@@ -13,10 +13,15 @@ npm-debug.log*
 
 # ZCode plugin runtime / deployment artifacts (not source)
 .zcode/
-.zcode-plugin/
 .zcode-*/**/
 plugins/
 skills/
+
+# Required source artifacts that must be committed
+!.zcode-plugin/
+!.zcode-plugin/**
+!context/context-manager.py
+!package-lock.json
 
 # Mimosa runtime artifacts
 .mimosa/
@@ -51,9 +56,5 @@ openspec/changes/*-test-probe/
 /tmp-wf-test*/
 /tmp-x/
 
-# Mimosa-blocked file (false positive on path traversal detection)
-# context-manager.py sanitizes inputs via _sanitize_component but Mimosa's
-# static analyzer still flags open() with user-derived paths.
-# Re-add manually to GitHub after push if needed.
-context/context-manager.py
-package-lock.json
+# NOTE: context/context-manager.py and package-lock.json are required source
+# files and must stay tracked. They are intentionally NOT ignored.

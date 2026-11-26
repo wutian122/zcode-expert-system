@@ -42,7 +42,11 @@ def handle_skill_invoke(task_description, context=None):
         }
 
     try:
-        result = zcode_expert_system(task_description.strip())
+        ctx = context if isinstance(context, dict) else {}
+        task_id = ctx.get("task_id") or None
+        persist = bool(ctx.get("persist", True))
+        result = zcode_expert_system(
+            task_description.strip(), task_id=task_id, persist=persist)
 
         # 提取 selected_expert 的 id
         selected_expert = result.get("selected_expert")
@@ -62,6 +66,8 @@ def handle_skill_invoke(task_description, context=None):
             "routing_warning": result.get("routing_warning"),
             "semantic_selection_required": result.get("semantic_selection_required"),
             "selection_basis": result.get("selection_basis"),
+            "no_expert": result.get("no_expert"),
+            "score_tied": result.get("score_tied"),
             "manager_id": result.get("manager_id", ""),
             "selected_expert_id": selected_expert_id,
             "selected_expert": selected_expert,
@@ -108,7 +114,7 @@ def get_skill_info():
     """
     return {
         "name": "zcode-expert-system",
-        "version": "3.2.3",
+        "version": "3.2.5",
         "description": "ZCode 专家体系 v3 - 基于 dsh-agency-agents 的 331 位专家，三层路由架构：LLM 分类（32 个一级大类）→ 32 个领域总经理任务分解 → 331 位领域专家执行",
         "input": {
             "task_description": {
@@ -121,6 +127,8 @@ def get_skill_info():
             "success": "bool",
             "task_id": "string",
             "category": "string",
+            "no_expert": "bool",
+            "score_tied": "bool",
             "manager_id": "string",
             "selected_expert_id": "string",
             "selected_expert": "object",

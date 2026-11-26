@@ -1,0 +1,26 @@
+{
+  "name": "zcode-expert-system",
+  "description": "ZCode Expert System v3.2 - 331 experts in 32 top-level categories with two-axis routing (scale -> nine-stage workflow, domain -> expert). Fuses OpenSpec + Superpowers + multi-agent + TDD.",
+  "description_i18n": {
+    "en": "ZCode Expert System v3.2 - 331 experts in 32 top-level categories with two-axis routing (scale -> nine-stage workflow, domain -> expert). Fuses OpenSpec + Superpowers + multi-agent + TDD.",
+    "zh-CN": "ZCode 专家体系 v3.2 - 331 位专家 / 32 个一级大类，两轴正交路由（规模→九阶段工作流，领域→专家）。融合 OpenSpec 规格、Superpowers 纪律、多 Agent 协作与 TDD。"
+  },
+  "version": "3.2.5",
+  "author": {
+    "name": "wutian122"
+  },
+  "skills": "skills",
+  "commands": "commands",
+  "agents": "agents",
+  "hooks": "hooks/hooks.json",
+  "keywords": [
+    "expert-system",
+    "routing",
+    "agents",
+    "workflow",
+    "openspec",
+    "superpowers",
+    "tdd",
+    "zcode"
+  ]
+}

@@ -1,6 +1,7 @@
 {
   "frontend-client": {
     "name": "前端与客户端",
+    "description": "前端与客户端：Web/React/Vue/Angular、iOS/Android、Electron/Tauri、微信小程序与调试；微信小程序调试优先使用微信开发者工具的模拟器与真机调试（扫码建立调试链路，支持真机日志、审计与性能Trace），线上环境可开启 vConsole 面板排查运行时日志与网络请求异常。",
     "manager": "manager-frontend-client",
     "expert_count": 8,
     "expert_ids": [
@@ -37,7 +38,8 @@
       "expert-engineering-video-streaming-engineer",
       "expert-engineering-wordpress-performance",
       "expert-engineering-wordpress-shopping-cart"
-    ]
+    ],
+    "description": "后端服务与架构：API 设计/治理、微服务、网关、认证鉴权、支付计费、CMS/低代码平台、钉钉/飞书/ServiceNow 集成、服务端性能与稳定性。"
   },
   "data-database": {
     "name": "数据与数据库",
@@ -52,7 +54,8 @@
       "expert-engineering-gaussdb-expert",
       "expert-engineering-knowledge-graph-engineer",
       "expert-engineering-search-relevance-engineer"
-    ]
+    ],
+    "description": "数据与数据库：数据工程、ETL/ELT、数据仓库/数据湖、SQL/索引/慢查询、数据库高可用、GaussDB、数据可视化、知识图谱、搜索相关性与排序评测。"
   },
   "devops-operations": {
     "name": "DevOps 与运维",
@@ -66,7 +69,8 @@
       "expert-engineering-it-service-manager",
       "expert-engineering-sre",
       "expert-specialized-developer-advocate"
-    ]
+    ],
+    "description": "DevOps 与运维：CI/CD、Docker/Kubernetes、Terraform/Ansible、SRE、可观测性、故障响应、FinOps、IT 服务管理、开发者布道。"
   },
   "ai-llm": {
     "name": "AI 与大模型",
@@ -82,7 +86,8 @@
       "expert-engineering-realtime-collaboration-engineer",
       "expert-engineering-voice-ai-integration-engineer",
       "expert-prompt-engineer"
-    ]
+    ],
+    "description": "AI 与大模型：LLM、RAG、Prompt/提示词、SFT/RLHF、Embedding/向量检索、多智能体、语音 AI、邮件智能、实时协作。"
   },
   "embedded-iot": {
     "name": "嵌入式与物联网",
@@ -95,7 +100,8 @@
       "expert-engineering-iot-fleet-engineer",
       "expert-engineering-iot-solution-architect",
       "expert-engineering-pc-host-engineer"
-    ]
+    ],
+    "description": "嵌入式与物联网：固件/RTOS、嵌入式 Linux 驱动、FPGA/ASIC、MQTT/LoRaWAN/BLE、IoT 平台、Qt/Modbus 上位机。"
   },
   "network-engineering": {
     "name": "网络工程",
@@ -105,7 +111,8 @@
       "expert-engineering-china-network-engineer",
       "expert-engineering-network-engineer-china",
       "expert-engineering-network-engineer"
-    ]
+    ],
+    "description": "网络工程：路由交换、防火墙、VLAN/OSPF/BGP/MPLS/VXLAN/SDN、华为/华三/锐捷、等保网络与割接排障。"
   },
   "engineering-quality": {
     "name": "工程效能与质量",
@@ -122,7 +129,8 @@
       "expert-lsp-index-engineer",
       "expert-specialized-civil-engineer",
       "expert-specialized-codebase-archaeologist"
-    ]
+    ],
+    "description": "工程效能与质量：代码审查、重构、技术债、Git 工作流、CLI/开发者工具、技术文档、LSP 索引、遗留代码审计、最小变更。"
   },
   "security-compliance": {
     "name": "安全与合规技术",
@@ -148,7 +156,8 @@
       "expert-security-threat-intelligence-analyst",
       "expert-specialized-ai-policy-writer",
       "expert-specialized-fedramp-rmf-compliance"
-    ]
+    ],
+    "description": "安全与合规技术：应用/云安全架构、渗透测试、威胁检测、事件响应、IAM/密钥、隐私、SOC2/ISO27001/等保、智能合约审计、AI 代码安全。"
   },
   "data-testing": {
     "name": "数据与测试",
@@ -170,7 +179,8 @@
       "expert-testing-test-results-analyzer",
       "expert-testing-tool-evaluator",
       "expert-testing-workflow-optimizer"
-    ]
+    ],
+    "description": "数据与测试：测试自动化、API/性能/嵌入式测试、测试结果分析、模型 QA、证据链、无障碍审核、文档/PDF 编译与生成、现实检验。"
   },
   "design-creative": {
     "name": "设计与创意",
@@ -191,7 +201,8 @@
       "expert-engineering-section-508-specialist",
       "expert-engineering-uswds-developer",
       "expert-specialized-focus-music-architect"
-    ]
+    ],
+    "description": "设计与创意：UI/UX、设计系统、品牌视觉、UX 研究、无障碍设计、视觉叙事、图像/视频提示词、游戏/音乐创意、包容性视觉。"
   },
   "marketing-growth": {
     "name": "营销与增长",
@@ -243,7 +254,8 @@
       "expert-marketing-xiaohongshu-operator",
       "expert-marketing-xiaohongshu-specialist",
       "expert-marketing-zhihu-strategist"
-    ]
+    ],
+    "description": "营销与增长：SEO/ASO/AEO/GEO、内容营销、社媒/短视频/电商运营、品牌传播、增长实验、中国市场本地化、新闻情报。"
   },
   "paid-media": {
     "name": "付费媒体",
@@ -257,7 +269,8 @@
       "expert-paid-media-programmatic-buyer",
       "expert-paid-media-search-query-analyst",
       "expert-paid-media-tracking-specialist"
-    ]
+    ],
+    "description": "付费媒体：PPC、Google/Meta/LinkedIn/TikTok 广告、程序化采买、搜索词/否定词、广告创意、归因追踪、媒体审计。"
   },
   "sales-customer": {
     "name": "销售与客户",
@@ -274,7 +287,8 @@
       "expert-sales-pipeline-analyst",
       "expert-sales-proposal-strategist",
       "expert-sales-outreach"
-    ]
+    ],
+    "description": "销售与客户：销售策略、Discovery/赢单、售前/POC、Pipeline、Outbound/Lead Gen、投标、客户拓展、销售教练。"
   },
   "business-strategy": {
     "name": "商业经营与战略",
@@ -299,7 +313,8 @@
       "expert-specialized-master-plan-architect",
       "expert-specialized-risk-assessor",
       "expert-specialized-salesforce-architect"
-    ]
+    ],
+    "description": "商业经营与战略：CEO/CTO/CFO/COO/CPO/CMO、商业战略、并购整合、变革管理、ESG、运营管理、国际化咨询。"
   },
   "healthcare": {
     "name": "医疗健康",
@@ -313,7 +328,8 @@
       "expert-healthcare-customer-service",
       "expert-healthcare-marketing-compliance",
       "expert-medical-billing-coding-specialist"
-    ]
+    ],
+    "description": "医疗健康：循证医学、医疗创新/系统治理、老年照护、医疗客服、医疗营销合规、ICD/CPT 账单编码。"
   },
   "supply-chain": {
     "name": "供应链与物流",
@@ -325,7 +341,8 @@
       "expert-supply-chain-inventory-forecaster",
       "expert-supply-chain-route-optimizer",
       "expert-supply-chain-vendor-evaluator"
-    ]
+    ],
+    "description": "供应链与物流：采购、供应商评估、库存预测、物流路线、服装工厂规划、供应链数字化。"
   },
   "legal-compliance": {
     "name": "法务与合规",
@@ -338,7 +355,8 @@
       "expert-legal-billing-time-tracking",
       "expert-legal-client-intake",
       "expert-legal-document-review"
-    ]
+    ],
+    "description": "法务与合规：合同/法律文书审查、制度文件、数据隐私/GDPR、律所接案/计费、合规审计。"
   },
   "hr": {
     "name": "人力资源",
@@ -352,7 +370,8 @@
       "expert-organizational-psychologist",
       "expert-recruitment-specialist",
       "expert-resume-tailor"
-    ]
+    ],
+    "description": "人力资源：招聘/人才获取、绩效管理、企业培训、入职管理、组织心理、简历优化。"
   },
   "finance-tax": {
     "name": "财务与税务",
@@ -373,7 +392,8 @@
       "expert-loan-officer-assistant",
       "expert-specialized-pricing-analyst",
       "expert-specialized-pricing-optimizer"
-    ]
+    ],
+    "description": "财务与税务：会计/簿记、FP&A、财务预测、投资研究、税务策略、发票管理、应付账款、信贷、定价、金融风控、港股合规。"
   },
   "academic-research": {
     "name": "学术与研究",
@@ -390,7 +410,8 @@
       "expert-gaokao-college-advisor",
       "expert-grant-writer",
       "expert-study-abroad-advisor"
-    ]
+    ],
+    "description": "学术与研究：人类学/地理/历史/心理/叙事、统计学、学习规划、高考志愿、留学规划、资助申请。"
   },
   "government-public": {
     "name": "政企与公共服务",
@@ -398,7 +419,8 @@
     "expert_count": 1,
     "expert_ids": [
       "expert-government-digital-presales-consultant"
-    ]
+    ],
+    "description": "政企与公共服务：政务数字化、ToG 售前、标书、等保/密评/信创、POC 验证。"
   },
   "business-support": {
     "name": "商业支持与专业服务",
@@ -411,7 +433,8 @@
       "expert-personal-growth-mentor",
       "expert-real-estate-buyer-seller",
       "expert-travel-planner"
-    ]
+    ],
+    "description": "商业支持与专业服务：酒店/旅行/房地产/零售退货、会议效率、个人成长、养殖档案、鉴定评估。"
   },
   "data-knowledge": {
     "name": "学术与知识服务",
@@ -420,7 +443,8 @@
     "expert_ids": [
       "expert-research-synthesist",
       "expert-zk-steward"
-    ]
+    ],
+    "description": "学术与知识服务：研究证据综合、文献检索与评价、知识管理、Zettelkasten 卡片盒、知识库建设。"
   },
   "game-dev": {
     "name": "游戏开发",
@@ -448,7 +472,8 @@
       "expert-unreal-systems-engineer",
       "expert-unreal-technical-artist",
       "expert-unreal-world-builder"
-    ]
+    ],
+    "description": "游戏开发：Unity/Unreal/Godot/Roblox、游戏设计、关卡/叙事、技术美术、Shader、多人网络、音频、经济系统、Blender。"
   },
   "spatial-computing": {
     "name": "空间计算与 XR",
@@ -461,7 +486,8 @@
       "expert-xr-cockpit-interaction-specialist",
       "expert-xr-immersive-developer",
       "expert-xr-interface-architect"
-    ]
+    ],
+    "description": "空间计算与 XR：visionOS、macOS Metal、XR 交互/界面、WebXR、空间计算、终端集成。"
   },
   "gis": {
     "name": "地理信息系统",
@@ -481,7 +507,8 @@
       "expert-gis-spatial-data-scientist",
       "expert-gis-technical-consultant",
       "expert-gis-web-gis-developer"
-    ]
+    ],
+    "description": "地理信息系统：GIS 分析/制图、Web GIS、空间数据/空间统计、BIM/GIS、无人机测绘、GeoAI、地理处理、解决方案。"
   },
   "project-management": {
     "name": "项目管理",
@@ -497,7 +524,8 @@
       "expert-project-manager-senior",
       "expert-specialized-meeting-assistant",
       "expert-specialized-workflow-architect"
-    ]
+    ],
+    "description": "项目管理：项目计划/排期、敏捷/Sprint、Jira、会议纪要/效率、实验追踪、工作室运营、工作流架构。"
   },
   "product-management": {
     "name": "产品管理",
@@ -510,7 +538,8 @@
       "expert-product-manager",
       "expert-product-sprint-prioritizer",
       "expert-product-trend-researcher"
-    ]
+    ],
+    "description": "产品管理：产品战略/路线图、需求/优先级、用户研究、反馈分析、开发者体验、增长/趋势、行为助推。"
   },
   "customer-support": {
     "name": "客户支持",
@@ -527,7 +556,8 @@
       "expert-support-legal-compliance-checker",
       "expert-support-recruitment-specialist",
       "expert-support-support-responder"
-    ]
+    ],
+    "description": "客户支持：客服/客户成功、工单/投诉、零售退货、客服响应、客户数据报表、高管摘要、财务追踪。"
   },
   "language-translation": {
     "name": "语言与跨文化",
@@ -536,7 +566,8 @@
     "expert_ids": [
       "expert-language-translator",
       "expert-technical-translator-agent"
-    ]
+    ],
+    "description": "语言与跨文化：中英/多语翻译、技术翻译、本地化、文化语境、跨文化沟通。"
   },
   "agent-governance": {
     "name": "身份与智能体治理",
@@ -552,6 +583,7 @@
       "expert-sales-data-extraction-agent",
       "expert-specialized-mcp-builder",
       "expert-specialized-strategy-duel-agent"
-    ]
+    ],
+    "description": "身份与智能体治理：AI 智能体身份/信任、智能体编排、自动化治理、身份图谱、MCP、数据整合、报告分发、策略推演。"
   }
 }

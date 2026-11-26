@@ -19,7 +19,7 @@ git rev-parse --is-inside-work-tree   # 有 git → diff 追溯路径
 ### 2. 账本初始化
 
 ```bash
-bash "${ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/sdd/sdd-workspace" <plan.md>
+bash "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/sdd/sdd-workspace" <plan.md>
 ```
 
 生成 `.superpowers/sdd/<plan-basename>/`。**路径以脚本为准**（脚本是 `task-brief` / `review-package` 的唯一目录解析器）。

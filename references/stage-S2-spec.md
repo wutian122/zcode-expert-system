@@ -6,7 +6,7 @@
 ## 前置（不可跳过）
 
 ```bash
-python scripts/openspec_engine.py list --root <项目根>   # 读 root；null 属正常返回，读 JSON 不要重试
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" list --root <项目根>   # 读 root；null 属正常返回，读 JSON 不要重试
 ```
 
 - `root: null` + 我自选 → 静默放弃，不提 setup
@@ -16,9 +16,9 @@ python scripts/openspec_engine.py list --root <项目根>   # 读 root；null �
 ## 动作
 
 ```bash
-python scripts/openspec_engine.py new-change <kebab-case>   # 生成 .openspec.yaml，禁手建
-python scripts/openspec_engine.py status --change "<name>"   # 解析 applyRequires + requires 边 + artifactPaths
-python scripts/openspec_engine.py instructions <artifact-id> --change "<name>"   # 取 template / resolvedOutputPath
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" new-change <kebab-case>   # 生成 .openspec.yaml，禁手建
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" status --change "<name>"   # 解析 applyRequires + requires 边 + artifactPaths
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" instructions <artifact-id> --change "<name>"   # 取 template / resolvedOutputPath
 ```
 
 对每个 ready 产物：读磁盘上依赖产物 → 写文件 → **重跑 status**。
@@ -50,7 +50,7 @@ python scripts/openspec_engine.py instructions <artifact-id> --change "<name>"  
 ## 退出条件（G2）
 
 - [ ] `applyRequires` 及可达产物全 `done`/`skipped`
-- [ ] `python scripts/openspec_engine.py validate --change <n>` 通过
+- [ ] `python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" validate --change <n>` 通过
 - [ ] 七项规格审查逐条勾选
 - [ ] `artifactPaths.specs.existingOutputPaths` 已记录（S8 的唯一 delta 来源）
 - [ ] **老板已完成产物审阅**

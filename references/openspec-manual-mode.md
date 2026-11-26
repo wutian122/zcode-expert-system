@@ -7,7 +7,7 @@
 
 | 触发条件 | 动作 |
 |---|---|
-| `python scripts/openspec_engine.py list --root <根>` 报错/无输出 | 进入手工模式 |
+| `python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" list --root <根>` 报错/无输出 | 进入手工模式 |
 | 宿主环境无 Python | 进入手工模式 |
 | 老板明确说「手工走 OpenSpec」 | 进入手工模式 |
 
@@ -93,5 +93,5 @@ applyRequires: <逗号分隔的 applyRequires 列表；无则留空>
 手工模式产出的目录与 CLI 产出的目录**结构完全一致**，修复环境后可直接恢复 CLI：
 
 1. 修好 Python / 重新部署 `scripts/openspec_engine.py`
-2. `python scripts/openspec_engine.py status --change <change>` 应能正确读取手工产物
+2. `python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" status --change <change>` 应能正确读取手工产物
 3. 若产物缺漏，按 status 返回的 `products` 补齐后再继续

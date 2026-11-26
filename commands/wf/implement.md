@@ -37,6 +37,7 @@ name: wf-implement
 ```python
 Agent(
   subagent_type = "<域专家>",
+  description = "专家：<域专家>",
   prompt = "<references/roles/implementer.md>\n\n"
            "【契约优先级】流程契约优先于专家人格。\n---\n"
            "读：<task-N-brief.md>\n报告写到：<task-N-report.md>\n"
@@ -77,7 +78,12 @@ Agent(
 
 ### 8. 原子回写
 
-同一消息完成：ledger 完成行 + `tasks.md` `- [x]` + todo 勾选。缺一不进下一任务。
+同一消息完成：ledger `## Dispatches` 派发行（implementer + reviewer）+ ledger 完成行
++ `tasks.md` `- [x]` + todo 勾选。缺一不进下一任务。
+
+派发行格式见 `templates/progress.md`：**未写派发行 = 未派发**（`S5.DISPATCH_IMPLEMENTER`
+/ `S6.L0_REQUIRES_DISPATCH` 会 FAIL）；`agent` 必须是 `config/experts.json` 里的专家名，
+`category` 必须与注册表一致；**implementer 不得填主控**。
 
 ## TDD 铁律
 
@@ -88,6 +94,7 @@ RED（看它因预期原因失败）→ GREEN（最小实现）→ REFACTOR（�
 ## 退出条件（G5，每任务）
 
 - [ ] brief + report + 变更集三件齐备
+- [ ] ledger `## Dispatches` 有 implementer 行（S5.DISPATCH_IMPLEMENTER）与 reviewer 行（S6.REVIEWER_DISPATCH）
 - [ ] 审查双结论齐备
 - [ ] ledger 有完成行
 - [ ] tasks.md 已勾选

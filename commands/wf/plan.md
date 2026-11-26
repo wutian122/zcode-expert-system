@@ -73,6 +73,6 @@ name: wf-plan
 - 执行模式未定 → **停，不得默认选**
 - 计划与 spec 矛盾 → 以 spec 为准；或回 S2
 
-核对：`${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/workflow_check.py --plan <plan.md> --scale <scale>`
+核对：`${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/workflow_check.py --change <change> --plan <plan.md> --scale <scale>`
 
 下一阶段：`/wf:implement`

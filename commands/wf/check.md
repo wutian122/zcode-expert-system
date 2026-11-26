@@ -10,7 +10,7 @@ name: wf-check
 ## 执行
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scripts/workflow_check.py" --change <change> --plan <plan.md> --scale <scale>
+python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/workflow_check.py" --change <change> --plan <plan.md> --scale <scale>
 ```
 
 `--json` 取结构化输出供脚本消费。
@@ -20,12 +20,12 @@ python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scr
 | 门禁 | 核对内容 |
 |---|---|
 | G0 | 环境探测 / 规模已分类 / 变更名格式 / 规模与账本一致 / **S0.DOMAIN**（账本 Triage 域路由两行：无账本 SKIP、不可读 FAIL `malformed_ledger`、readonly SKIP、非只读缺行 FAIL `s0_domain_missing`） |
-| G1 | 设计未违规落盘（R3） |
+| G1 | 设计未违规落盘（R3）：本次新增 = 文件名含当天日期或 mtime 为当天（排除 git 已跟踪）。medium/large/非法规模命中即 **FAIL**；light/bug 缺「非权威」标注或不可读也 **FAIL** |
 | G2 | 变更目录存在 / proposal / design / tasks / delta specs / .openspec.yaml |
-| G3 | 计划必备段（按 scale 裁剪）/ `### Task N:` 格式 / 无占位符 / 双账本对齐 |
+| G3 | 计划必备段（按 scale 裁剪）/ `### Task N:` 格式 / 无占位符 / 双账本对齐；**Bug 额外要求 `## Bug Investigation` 且含入口/根因/假设/方案/双确认/RED/red-green/全量回归** |
 | G4 | **基线主副本在计划文档** / 账本存在 / 账本首行身份（INV4） |
-| G5 | brief + report 存在 / **三元对齐**（任务号集合相等，退化时比计数） |
-| G6 | **审查独立性标记 L0/L1/L2**（取最坏值）/ Rulings 持久化 / Review 段含结论载体 |
+| G5 | brief + report 存在 / **三元对齐**（任务号集合相等，退化时比计数）/ **dispatch 证据**：完成任务的 implementer 派发行（`S5.DISPATCH_IMPLEMENTER`）/ report 与派发一一对应（`S5.DISPATCH_ORPHAN_REPORT`）/ agent·category 与 `config/experts.json` 一致（`S5.IMPLEMENTER_IS_EXPERT`） |
+| G6 | **审查独立性标记 L0/L1/L2**（取最坏值）/ Rulings 持久化（L1 无 `Ruling:` 行即 FAIL）/ Review 段含结论载体 / **dispatch 证据**：reviewer 派发行（`S6.REVIEWER_DISPATCH`）/ reviewer ≠ implementer（`S6.REVIEWER_DIFFERENT_EXPERT`）/ L0 必须有独立审查派发（`S6.L0_REQUIRES_DISPATCH`）/ 计划 `## Review` 的 implementer·reviewer 身份行（`S6.REVIEW_IDENTITIES`） |
 | G8a | **集成后重测已记录** |
 | G8b | 完成度（只认 x/X）/ 无 PARKED 残留 / 主 spec 逐能力同步 / 归档目录 |
 
@@ -63,6 +63,10 @@ python "${CLAUDE_PLUGIN_ROOT:-$ZCODE_PLUGIN_ROOT}/skills/zcode-expert-system/scr
 | 基线主副本缺失 | 把 S4 基线记录写入计划 `## Baseline` |
 | 三元对齐不符 | 核对 git/快照实际变更，修正 ledger 与 tasks.md，记 Ruling |
 | 独立性标记缺失 | 补 `independence: L0/L1`；L2 禁止交付 |
+| `missing:implementer_dispatch` | 在账本 `## Dispatches` 补本任务的 `role=implementer` 行（未写=未派发；补记须与真实派发一致，不得事后编造） |
+| `missing:reviewer_dispatch` / `forbidden:l0_self_review` | 补 `role=reviewer` 行；L0 的 reviewer 不能是主控自己——真要自审就降 L1 并记 Ruling |
+| `missing:review_identities` | 在计划 `## Review` 补 `implementer:` 与 `reviewer:` 两行 |
+| `missing:implementer_expert` | 派发行 `agent` 用 `config/experts.json` 里的专家名，`category` 与注册表一致 |
 | Rulings 未持久化 | 从 ledger 导出全部 `Ruling:` 行到计划 `## Rulings` |
 | 集成后重测未记录 | 在目标树重跑全量测试并写入 `## Integration Verification` |
 | PARKED 残留 | 迁出到新 change，或终审裁决后勾选 |

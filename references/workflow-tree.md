@@ -12,9 +12,9 @@ S0 分诊（规模+域双轴） → S1 设计 →[老板批准]→ S2 规格 →
 
 | 分支 | 触发 | 路径 |
 |---|---|---|
-| **B0 只读** | 分类=只读 | S0（双轴分诊）→ 派 analyst（领域专家只读分析）→ 输出 → 结束（结构：现象→原因→影响→建议） |
+| **B0 只读** | 分类=只读 | S0（双轴分诊）→ 派 analyst（领域专家只读分析，仅查看类工具，禁增删改）→ 输出 → 结束（结构：现象→原因→影响→建议） |
 | **B1 无 git** | `git rev-parse` 失败 | 全流程，但变更集用**快照差集**，审查记 L1 降级声明 |
-| **B2 Bug** | 分类=Bug | S0 → Bug 专项（Phase1-4 + 双确认）→ 条件回 S2/S3 → S5-S7 |
+| **B2 Bug** | 分类=Bug | S0 → Bug 专项（Phase1-4 + 双确认）→ 条件回 S2/S3 → S5-S7；关键证据必须同步到计划 `## Bug Investigation`（P3） |
 | **B3 轻量** | ≤3 文件 | S0必(双轴分诊) → S1简 → S5必(TDD) → S6简 → 收尾 |
 | **B4 大任务** | 跨模块/架构 | 九阶段完整（但实施仍串行，见 W1） |
 
@@ -44,8 +44,8 @@ S0 分诊（规模+域双轴） → S1 设计 →[老板批准]→ S2 规格 →
 | # | 读什么 | 为什么这个位置 |
 |---|---|---|
 | 1 | 项目 `AGENTS.md` + 本地偏离登记 | 偏离项改变后续一切解释 |
-47	| 2 | `python scripts/openspec_engine.py status --change <n>` | **唯一合法路径来源**，禁自己拼 |
-48	| 3 | `python scripts/openspec_engine.py instructions apply --change <n> --json` | 拿 contextFiles + progress + sourcePath |
+| 2 | `python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" status --change <n>` | **唯一合法路径来源**，禁自己拼 |
+| 3 | `python "${CLAUDE_PLUGIN_ROOT:-${ZCODE_PLUGIN_ROOT:-$QODER_PLUGIN_ROOT}}/skills/zcode-expert-system/scripts/openspec_engine.py" instructions apply --change <n> --json` | 拿 contextFiles + progress + sourcePath |
 | 4 | `tasks.md` | 只做勾选快照，**不作结论** |
 | 5 | `progress.md` **首行** | 归属确认；不同 → 不是你的账本，另建 |
 | 6 | `progress.md` 全文 | 阶段/任务表/Blockers/最后修复轮/全部 Ruling |

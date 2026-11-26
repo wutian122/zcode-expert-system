@@ -1,5 +1,10 @@
 # 审查报告模板
 
+> 文件名 `review-<N>.md` 的 **N 是审查轮次，不是任务号**；一次审查覆盖多个任务时仍写 `review-1.md`。
+> `review-<range>.diff` 是变更集文件，不用于审查报告命名。
+>
+> 独立性：`L0` = 独立审查可交付；`L1` = 自审降级可交付须声明；`L2` = 无审查，禁止交付。
+
 ```
 VERDICT: APPROVED | NEEDS_FIX | BLOCKED
 SPEC: ✅ SPEC-OK | ❌ SPEC-FAIL

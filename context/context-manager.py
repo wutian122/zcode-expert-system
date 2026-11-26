@@ -15,13 +15,29 @@ MAX_RESULT_FILES = 200
 
 
 def _default_store_dir():
-    """默认存储目录放到用户目录，避免污染技能/插件安装目录。
+    """按宿主隔离运行时上下文，避免三平台共用同一个 200 文件 LRU。
 
-    npm 全局安装时包目录通常只读，写进去会失败；
-    放在 ~/.zcode/expert-system/context 下也更符合"运行时数据"的定位。
+    优先级：
+      1. ZCODE_EXPERT_CONTEXT_DIR（显式覆盖；测试与自定义部署使用）
+      2. Qoder Desktop：QODER_HOME/expert-system/context
+      3. Claude Code：~/.claude/expert-system/context
+      4. ZCode / 默认：~/.zcode/expert-system/context（保持历史行为）
+
+    仍然放在用户目录，避免写入可能只读的插件安装目录。
     """
+    override = os.environ.get("ZCODE_EXPERT_CONTEXT_DIR")
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+
     home = os.path.expanduser("~")
-    return os.path.join(home, ".zcode", "expert-system", "context")
+    qoder_home = os.environ.get("QODER_HOME")
+    if qoder_home:
+        base = os.path.abspath(os.path.expanduser(qoder_home))
+    elif os.environ.get("CLAUDE_PLUGIN_ROOT"):
+        base = os.path.join(home, ".claude")
+    else:
+        base = os.path.join(home, ".zcode")
+    return os.path.join(base, "expert-system", "context")
 
 
 def _sanitize_component(value):

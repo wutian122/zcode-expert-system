@@ -53,7 +53,7 @@
 
 - 全部 `Ruling:` 行 → 计划 `## Rulings`
 - 基线记录 → 计划 `## Baseline`（S4 已双写）
-- 审查结论与独立性 → 计划 `## Review`
+- 审查结论、独立性**与 findings 摘要（Critical/Important 全列，含 `file:line`）** → 计划 `## Review`
 - 集成后重测 → 计划 `## Integration Verification`
 
 **未导出禁止删。** 否则老板永远看不到"我做了哪些裁决"。
