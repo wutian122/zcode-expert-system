@@ -40,23 +40,22 @@ import zcode_expert_system as zes  # noqa: E402
 def test_tie_resolves_by_declared_priority_not_alphabet():
     """同分并列时必须按 KEYWORD_MAP 声明优先级取，而非分类名字母序。
 
-    '这个数据怎么解读' 在退化二下 data-testing / gis / data-database 三者同分。
+    '这个数据怎么处理' 在退化二下 customer-support / gis 同分。
 
     使用例自身推导期望值（并列集中声明序最靠前者），而**不写死分类名**——
     否则会把当前词表顺序固化成契约，日后调整词表顺序就要改测试。
     同时断言该期望值必须与字母序胜者不同，确保这条用例真能区分新旧行为。
     """
-    task = "这个数据怎么解读"
+    task = "这个数据怎么处理"
     declared_order = list(zes.KEYWORD_MAP)
 
     # 复算退化二的并列集合（不依赖被测函数的内部实现）
     tokens = zes._tokenize(task)
+    descriptions = zes._category_descriptions()
     scored = []
     for cat, keywords in zes.KEYWORD_MAP.items():
-        cat_tokens = zes._tokenize(" ".join(keywords))
-        if not cat_tokens:
-            continue
-        score = len(tokens & cat_tokens) / float(len(tokens))
+        score = zes._category_affinity_score(
+            tokens, keywords, description=descriptions.get(cat, ""))
         if score > 0:
             scored.append((score, cat))
 
@@ -104,8 +103,10 @@ def test_tie_break_uses_declared_order_across_corpus():
         if not tokens:
             continue
         scored = []
+        descriptions = zes._category_descriptions()
         for cat, keywords in zes.KEYWORD_MAP.items():
-            score = zes._category_affinity_score(tokens, keywords)
+            score = zes._category_affinity_score(
+                tokens, keywords, description=descriptions.get(cat, ""))
             if score > 0:
                 scored.append((score, cat))
         if not scored:
@@ -294,3 +295,20 @@ def test_llm_verdict_still_picks_best_on_clear_signal():
     picked = zes.llm_verdict("做一次授权渗透测试", [cand_weak, cand_strong])
     assert picked is not None
     assert picked["id"] == "s", f"应选相关性更高的专家，实际选了 {picked}"
+
+
+# ---------------------------------------------------------------- 7. margin 置信度
+
+def test_weak_single_keyword_is_capped():
+    """单个 2 字关键词不得给出高置信度。"""
+    _cat, conf, _alts, detail = zes.classify_task_with_evidence("测试")
+    assert detail["weak_single"] is True
+    assert conf <= 0.5
+
+
+def test_tied_categories_are_capped_below_threshold():
+    """真并列时置信度必须降到阻断区。"""
+    _cat, conf, alts, detail = zes.classify_task_with_evidence("实现 token 刷新")
+    assert detail["tied"] is True
+    assert alts
+    assert conf < zes.LOW_CONFIDENCE_THRESHOLD

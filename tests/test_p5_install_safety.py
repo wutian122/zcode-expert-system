@@ -92,6 +92,9 @@ def sandbox(tmp_path, monkeypatch):
         monkeypatch.setenv(key, value)
 
     env = dict(os.environ)
+    # 本批用例验证的是文件部署/备份/回滚，不启动真实 Claude CLI；
+    # 统一安装的 marketplace 注册由 test_unified_install_registers_claude 覆盖。
+    env["ZES_CLAUDE_INSTALL"] = "legacy"
 
     # 安全闸 1：Python 侧
     resolved = Path(os.path.expanduser("~")).resolve()
@@ -128,7 +131,10 @@ def make_source(tmp_path, *, drop_agents=False, drop_config=False, drop_icon_man
     必须拷贝真实文件（占位 0 字节文件过不了内容断言）。
     """
     src = tmp_path / "src"
-    for rel in ("scripts", "config", "hooks", "commands"):
+    # v3.2.5：templates/ 与 references/ 是部署必需组件（install.js 预检 +
+    # 部署后校验都会查），沙箱必须与真实源树同构，否则任何安装用例都会被
+    # 预检正确拦下——那是夹具失真，不是被测行为。
+    for rel in ("scripts", "config", "hooks", "commands", "templates", "references"):
         shutil.copytree(PROJECT_ROOT / rel, src / rel)
     for rel in ("package.json", "SKILL.md", "skill_entry.py",
                 "zcode_expert_system.py", "zcode_dev_workflow.py"):
@@ -868,3 +874,587 @@ def test_deploy_claude_code_fails_when_manifest_missing(sandbox, tmp_path):
     assert "部署失败" in (proc.stdout + proc.stderr), "未打印失败原因"
     assert "部署完成" not in (proc.stdout + proc.stderr), (
         "manifest 缺失仍打印「部署完成」——静默成功误导用户（npm 3.2.2 事故）")
+
+
+# ===========================================================================
+# Claude Code 注册回归：统一 install 必须走本地 marketplace，而非只复制文件
+# ===========================================================================
+
+def _install_fake_claude(bin_dir, enable=True):
+    """写一个最小 claude CLI 替身：记录调用并模拟 marketplace add/install。
+
+    enable=False 模拟「注册成功但 enabledPlugins 没写进去」的真实故障形态
+    （I6）：CLI 装上了插件，但 /plugin 里是关闭态。
+    """
+    bin_dir.mkdir()
+    fake = bin_dir / "fake-claude.js"
+    fake.write_text(r'''const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const ENABLE = __ENABLE__;
+const home = os.homedir();
+const claude = path.join(home, '.claude');
+const plugins = path.join(claude, 'plugins');
+const args = process.argv.slice(2);
+fs.mkdirSync(plugins, { recursive: true });
+fs.appendFileSync(path.join(home, 'fake-claude-calls.log'), args.join(' ') + '\n');
+
+if (args.includes('--version')) process.exit(0);
+
+const now = new Date().toISOString();
+const write = (file, data) => {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
+};
+const read = (file) => {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+};
+
+if (args[0] === 'plugin' && args[1] === 'marketplace' && args[2] === 'add') {
+  const market = args[3];
+  const file = path.join(plugins, 'known_marketplaces.json');
+  const known = read(file) || {};
+  known['zcode-local'] = {
+    source: { source: 'directory', path: market },
+    installLocation: market,
+    lastUpdated: now,
+  };
+  write(file, known);
+  process.exit(0);
+}
+
+if (args[0] === 'plugin' && args[1] === 'install') {
+  const src = path.join(plugins, 'marketplaces', 'zcode-local', 'zcode-expert-system');
+  const manifest = read(path.join(src, '.claude-plugin', 'plugin.json')) || {};
+  const version = manifest.version || '0.0.0';
+  const dest = path.join(plugins, 'cache', 'zcode-local', 'zcode-expert-system', version);
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.cpSync(src, dest, { recursive: true });
+
+  const file = path.join(plugins, 'installed_plugins.json');
+  const installed = read(file) || { version: 2, plugins: {} };
+  installed.version = installed.version || 2;
+  installed.plugins = installed.plugins || {};
+  installed.plugins['zcode-expert-system@zcode-local'] = [{
+    scope: 'user', installPath: dest, version, installedAt: now, lastUpdated: now,
+  }];
+  write(file, installed);
+
+  if (ENABLE) {
+    const settingsFile = path.join(claude, 'settings.json');
+    const settings = read(settingsFile) || {};
+    settings.enabledPlugins = settings.enabledPlugins || {};
+    settings.enabledPlugins['zcode-expert-system@zcode-local'] = true;
+    write(settingsFile, settings);
+  }
+  process.exit(0);
+}
+
+process.exit(0);
+'''.replace('__ENABLE__', 'true' if enable else 'false'), encoding="utf-8")
+    if os.name == "nt":
+        (bin_dir / "claude.cmd").write_text(
+            '@echo off\r\nnode "%~dp0fake-claude.js" %*\r\n', encoding="utf-8")
+    else:
+        shim = bin_dir / "claude"
+        shim.write_text(
+            '#!/bin/sh\nexec node "$(dirname "$0")/fake-claude.js" "$@"\n',
+            encoding="utf-8")
+        shim.chmod(0o755)
+    return bin_dir
+
+
+def test_unified_install_registers_claude_via_marketplace(sandbox, tmp_path):
+    """统一 install 的 Claude 目标必须真正注册插件。
+
+    只复制到旧缓存目录不会出现在 /plugin 中（v3.2.2 事故）。
+    本用例用 claude CLI 替身确认：构建本地 marketplace →
+    claude plugin marketplace add → claude plugin install →
+    installed_plugins.json / enabledPlugins 均有 zcode-local 条目。
+    """
+    env, home = sandbox
+    env = dict(env)
+    env.pop("ZES_CLAUDE_INSTALL", None)  # 恢复默认 marketplace 路径
+
+    fake_bin = _install_fake_claude(tmp_path / "fakebin")
+    env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
+
+    src = make_source(tmp_path)
+    # make_source 已含 references/templates；这里只补 Claude 专属的 bin/context
+    for rel in ("bin", "context"):
+        shutil.copytree(PROJECT_ROOT / rel, src / rel)
+
+    proc = run_installer(src, env, "--targets", "claude-code")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out[-1000:]
+
+    installed = read_json(home / ".claude" / "plugins" / "installed_plugins.json")
+    assert "zcode-expert-system@zcode-local" in installed.get("plugins", {}), out[-1000:]
+
+    settings = read_json(home / ".claude" / "settings.json")
+    assert settings.get("enabledPlugins", {}).get(
+        "zcode-expert-system@zcode-local") is True, "插件未启用"
+
+    calls = (home / "fake-claude-calls.log").read_text(encoding="utf-8")
+    assert "plugin marketplace add" in calls, calls
+    assert "plugin install zcode-expert-system@zcode-local" in calls, calls
+
+    legacy = (home / ".claude" / "plugins" / "cache" / "claude-plugins-official"
+              / "zcode-expert-system")
+    assert not legacy.exists(), "仍走旧缓存直拷路径——/plugin 不会加载"
+
+
+# ===========================================================================
+# C1（2026-11-26 复审）：卸载不得静默删除含用户文件的备份
+#
+# 抓的破坏：`--uninstall --zcode` 无 --purge 时无条件 rmSync
+# `skills/zcode-expert-system.bak-*`。备份是安装时 rename 出来的**旧技能
+# 目录**，里面可能有用户自己写的文件；无条件删除等于「卸个插件顺手销毁
+# 用户数据」，而且真实模式经 act() 静默执行、连一行日志都没有。
+#
+# 口径：与安装侧共用一个 hasUserFiles 判定——空备份才自动删，含用户文件
+# 的保留并打印路径；只有显式 --purge 才连同用户文件一起删。
+# ===========================================================================
+
+def _seed_user_file_in_backup(sandbox, tmp_path):
+    """安装 → 往技能目录塞用户文件 → 重装（生成含用户文件的备份）。
+
+    返回 (src, env, home, 备份目录, 用户文件)。
+    """
+    env, home = sandbox
+    src = make_source(tmp_path)
+    assert run_installer(src, env).returncode == 0, "首次安装应成功"
+
+    deployed = zcode(home) / "skills" / "zcode-expert-system"
+    user_note = deployed / "我的笔记.md"
+    user_note.write_text("用户自建内容，不许被卸载删掉\n", encoding="utf-8")
+
+    proc = run_installer(src, env)
+    assert proc.returncode == 0, (proc.stdout + proc.stderr)[-800:]
+
+    baks = [p for p in (zcode(home) / "skills").glob("zcode-expert-system.bak-*")]
+    assert len(baks) == 1, "重装后应恰好留下一个备份目录，实际：%s" % baks
+    bak = baks[0]
+    assert (bak / "我的笔记.md").is_file(), "备份里没有用户文件——夹具不成立"
+    return src, env, home, bak, bak / "我的笔记.md"
+
+
+def test_uninstall_keeps_backup_with_user_files(sandbox, tmp_path):
+    """`--uninstall --zcode`（无 --purge）必须保留含用户文件的备份。"""
+    src, env, home, bak, user_note = _seed_user_file_in_backup(sandbox, tmp_path)
+
+    proc = subprocess.run(
+        ["node", str(src / "scripts" / "install.js"), "--uninstall", "--zcode"],
+        env=env, capture_output=True, text=True, timeout=120, cwd=str(src),
+        encoding="utf-8", errors="replace")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out[-800:]
+
+    assert bak.exists(), "卸载删掉了含用户文件的备份目录（数据销毁）"
+    assert user_note.is_file(), "卸载删掉了备份里的用户文件"
+    assert "用户自建内容" in user_note.read_text(encoding="utf-8")
+    # 保留必须是可见事实：路径要打印出来，用户才知道去清
+    assert "保留" in out and bak.name in out, (
+        "保留备份未在日志中明确列出路径：%s" % out[-800:])
+
+
+def test_uninstall_purge_deletes_backup_with_user_files(sandbox, tmp_path):
+    """`--uninstall --zcode --purge` 才允许删除含用户文件的备份。"""
+    src, env, home, bak, user_note = _seed_user_file_in_backup(sandbox, tmp_path)
+
+    proc = subprocess.run(
+        ["node", str(src / "scripts" / "install.js"),
+         "--uninstall", "--zcode", "--purge"],
+        env=env, capture_output=True, text=True, timeout=120, cwd=str(src),
+        encoding="utf-8", errors="replace")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out[-800:]
+
+    assert not bak.exists(), "--purge 未删除备份目录：%s" % bak
+    assert not user_note.exists(), "--purge 后用户文件仍残留"
+
+
+def test_uninstall_deletes_empty_backup_without_purge(sandbox, tmp_path):
+    """双向反例：只含插件产物的备份（无用户文件），无 --purge 也应清掉。"""
+    env, home = sandbox
+    src = make_source(tmp_path)
+    assert run_installer(src, env).returncode == 0
+
+    # 模拟一次中断/历史遗留的备份：里面只有插件自己的产物
+    bak = zcode(home) / "skills" / "zcode-expert-system.bak-1000"
+    (bak / "config").mkdir(parents=True)
+    (bak / "SKILL.md").write_text("旧版技能说明\n", encoding="utf-8")
+    (bak / "config" / "workflow.json").write_text("{}\n", encoding="utf-8")
+
+    proc = subprocess.run(
+        ["node", str(src / "scripts" / "install.js"), "--uninstall", "--zcode"],
+        env=env, capture_output=True, text=True, timeout=120, cwd=str(src),
+        encoding="utf-8", errors="replace")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out[-800:]
+    assert not bak.exists(), "只含插件产物的备份未被清理：%s" % bak
+
+
+# ===========================================================================
+# Claude Code 卸载：缓存目录对称清理
+# ===========================================================================
+
+def _seed_claude_uninstall(home):
+    """造出 Claude 注册状态与四个缓存目录（两个本插件、两个他人插件）。"""
+    plugins = home / ".claude" / "plugins"
+    plugins.mkdir(parents=True, exist_ok=True)
+    installed = plugins / "installed_plugins.json"
+    installed.write_text(json.dumps({
+        "version": 2,
+        "plugins": {
+            "zcode-expert-system@zcode-local": [{
+                "scope": "user",
+                "installPath": str(plugins / "cache" / "zcode-local"
+                                  / "zcode-expert-system" / "3.2.5"),
+                "version": "3.2.5",
+            }],
+        },
+    }, indent=2), encoding="utf-8")
+    known = plugins / "known_marketplaces.json"
+    known.write_text(json.dumps({
+        "zcode-local": {
+            "source": {"source": "directory",
+                       "path": str(plugins / "marketplaces" / "zcode-local")},
+            "installLocation": str(plugins / "marketplaces" / "zcode-local"),
+        },
+    }, indent=2), encoding="utf-8")
+    (home / ".claude" / "settings.json").write_text(json.dumps({
+        "enabledPlugins": {"zcode-expert-system@zcode-local": True},
+    }, indent=2), encoding="utf-8")
+
+    dirs = [
+        plugins / "cache" / "zcode-local" / "zcode-expert-system" / "3.2.5",
+        plugins / "cache" / "claude-plugins-official" / "zcode-expert-system" / "3.2.1",
+        plugins / "cache" / "claude-plugins-official" / "playwright" / "1.0.0",
+        plugins / "cache" / "zcode-local" / "other-plugin" / "1.0.0",
+        plugins / "marketplaces" / "zcode-local",
+    ]
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "marker.txt").write_text("x\n", encoding="utf-8")
+    return dirs
+
+
+def _claude_uninstall_env(env, tmp_path):
+    env = dict(env)
+    env.pop("ZES_CLAUDE_INSTALL", None)
+    fake_bin = _install_fake_claude(tmp_path / "fakebin-uninstall")
+    env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
+    return env
+
+
+def test_claude_uninstall_removes_plugin_cache_dirs(sandbox, tmp_path):
+    """卸载必须清掉本插件两个缓存子目录，不能只删 marketplace 目录。"""
+    env, home = sandbox
+    env = _claude_uninstall_env(env, tmp_path)
+    src = make_source(tmp_path)
+    _seed_claude_uninstall(home)
+
+    proc = subprocess.run(
+        ["node", str(src / "scripts" / "install.js"), "--uninstall", "--claude-code"],
+        env=env, capture_output=True, text=True, timeout=120, cwd=str(src),
+        encoding="utf-8", errors="replace")
+    assert proc.returncode == 0, (proc.stdout + proc.stderr)[-800:]
+
+    plugins = home / ".claude" / "plugins"
+    assert not (plugins / "cache" / "zcode-local" / "zcode-expert-system").exists(), \
+        "卸载后 cache/zcode-local/zcode-expert-system 仍残留"
+    assert not (plugins / "cache" / "claude-plugins-official"
+                / "zcode-expert-system").exists(), \
+        "卸载后旧官方缓存 zcode-expert-system 仍残留"
+    assert not (plugins / "marketplaces" / "zcode-local").exists(), \
+        "卸载后 marketplace 目录仍残留"
+
+
+def test_claude_uninstall_keeps_other_plugins_cache(sandbox, tmp_path):
+    """卸载只删本插件子目录，其他插件的缓存不得被误删。"""
+    env, home = sandbox
+    env = _claude_uninstall_env(env, tmp_path)
+    src = make_source(tmp_path)
+    _seed_claude_uninstall(home)
+
+    proc = subprocess.run(
+        ["node", str(src / "scripts" / "install.js"), "--uninstall", "--claude-code"],
+        env=env, capture_output=True, text=True, timeout=120, cwd=str(src),
+        encoding="utf-8", errors="replace")
+    assert proc.returncode == 0, (proc.stdout + proc.stderr)[-800:]
+
+    plugins = home / ".claude" / "plugins"
+    assert (plugins / "cache" / "claude-plugins-official"
+            / "playwright" / "1.0.0" / "marker.txt").is_file(), \
+        "误删了其他插件（playwright）的缓存"
+    assert (plugins / "cache" / "zcode-local"
+            / "other-plugin" / "1.0.0" / "marker.txt").is_file(), \
+        "误删了其他插件（other-plugin）的缓存"
+
+
+# ===========================================================================
+# I1（2026-11-26 复审）：无 claude CLI 时卸载必须清掉幽灵注册
+#
+# 抓的破坏：`claude plugin uninstall` / `marketplace remove` 失败时老实现
+# 只打一句 ⚠️，随后照删缓存目录并打印「🎉 卸载完成」。用户机器上
+# installed_plugins.json 与 settings.json.enabledPlugins 的条目仍在——
+# 重装时撞「已安装」，排查半天找不到东西。
+# ===========================================================================
+
+def _path_without_claude(env):
+    """PATH 去掉所有含 claude 可执行文件的目录——模拟「本机没装 Claude CLI」。"""
+    exe = "claude.cmd" if os.name == "nt" else "claude"
+    kept = []
+    for part in env.get("PATH", "").split(os.pathsep):
+        if not part:
+            continue
+        if (Path(part) / exe).exists():
+            continue
+        kept.append(part)
+    return os.pathsep.join(kept)
+
+
+def test_claude_uninstall_without_cli_clears_registration(sandbox, tmp_path):
+    """无 claude CLI 时卸载：注册/启用键消失、缓存删除、rc=0、不碰其他插件。"""
+    env, home = sandbox
+    env = dict(env)
+    env.pop("ZES_CLAUDE_INSTALL", None)
+    env["PATH"] = _path_without_claude(env)
+    assert shutil.which("claude", path=env["PATH"]) is None, (
+        "夹具失真：PATH 里仍能解析到 claude CLI")
+
+    src = make_source(tmp_path)
+    _seed_claude_uninstall(home)
+
+    # 另一个插件的注册与启用条目必须原样保留
+    inst_file = home / ".claude" / "plugins" / "installed_plugins.json"
+    inst = read_json(inst_file)
+    inst["plugins"]["other-plugin@zcode-local"] = [{
+        "scope": "user", "installPath": "x", "version": "1.0.0",
+    }]
+    inst_file.write_text(json.dumps(inst, indent=2), encoding="utf-8")
+    set_file = home / ".claude" / "settings.json"
+    settings = read_json(set_file)
+    settings["enabledPlugins"]["other-plugin@zcode-local"] = True
+    set_file.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+
+    proc = subprocess.run(
+        ["node", str(src / "scripts" / "install.js"), "--uninstall", "--claude-code"],
+        env=env, capture_output=True, text=True, timeout=120, cwd=str(src),
+        encoding="utf-8", errors="replace")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out[-1000:]
+
+    installed = read_json(inst_file)
+    assert "zcode-expert-system@zcode-local" not in installed["plugins"], (
+        "installed_plugins.json 仍有本插件幽灵注册：%s" % installed["plugins"])
+    assert "other-plugin@zcode-local" in installed["plugins"], "误删了其他插件的注册"
+
+    settings = read_json(set_file)
+    assert "zcode-expert-system@zcode-local" not in settings["enabledPlugins"], (
+        "settings.json 仍有本插件启用键：%s" % settings["enabledPlugins"])
+    assert settings["enabledPlugins"].get("other-plugin@zcode-local") is True, \
+        "误删了其他插件的启用键"
+
+    known = read_json(home / ".claude" / "plugins" / "known_marketplaces.json")
+    assert "zcode-local" not in known, "known_marketplaces.json 仍有市场注册"
+
+    plugins = home / ".claude" / "plugins"
+    assert not (plugins / "cache" / "zcode-local" / "zcode-expert-system").exists(), \
+        "无 CLI 时缓存目录未删除"
+    assert not (plugins / "marketplaces" / "zcode-local").exists(), \
+        "无 CLI 时市场目录未删除"
+    assert "卸载完成" in out, "注册已清干净却未打印卸载完成：%s" % out[-600:]
+
+
+# ===========================================================================
+# Claude Code 独立安装脚本（scripts/install-claude-code.js）
+#   I2：dry-run 必须跑预检，且不得打印「安装完成」
+#   I6：enabledPlugins 未生效必须 rc≠0，不得打印「安装完成」
+# ===========================================================================
+
+CLAUDE_INSTALLER = PROJECT_ROOT / "scripts" / "install-claude-code.js"
+
+
+def _run_claude_installer(src, env, *args):
+    return subprocess.run(
+        ["node", str(src / "scripts" / "install-claude-code.js")] + list(args),
+        env=env, capture_output=True, text=True, timeout=180, cwd=str(src),
+        encoding="utf-8", errors="replace")
+
+
+def _make_claude_source(tmp_path):
+    """make_source 之外补 Claude 专属的 bin/ context/（PLUGIN_COMPONENTS 成员）。"""
+    src = make_source(tmp_path)
+    for rel in ("bin", "context"):
+        shutil.copytree(PROJECT_ROOT / rel, src / rel)
+    return src
+
+
+def test_claude_dry_run_never_reports_install_complete(sandbox, tmp_path):
+    """dry-run 只输出计划：不得出现「安装完成」，且零写入。"""
+    env, home = sandbox
+    env = dict(env)
+    env.pop("ZES_CLAUDE_INSTALL", None)
+    src = _make_claude_source(tmp_path)
+
+    proc = _run_claude_installer(src, env, "--dry-run", "--targets", "claude-code")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out[-1000:]
+    assert "安装完成" not in out, "dry-run 打印了「安装完成」——假完成：%s" % out[-600:]
+    assert "dry-run 结束" in out, "dry-run 未给出计划收尾说明：%s" % out[-600:]
+    # 双目标 dry-run 走 main() 的合并收尾分支，同样不得报完成
+    proc2 = _run_claude_installer(src, env, "--dry-run", "--targets", "claude-code,zcode")
+    out2 = proc2.stdout + proc2.stderr
+    assert "安装完成" not in out2, "双目标 dry-run 打印了「安装完成」：%s" % out2[-600:]
+    assert not (home / ".claude" / "plugins").exists(), "dry-run 改动了磁盘"
+
+
+def test_claude_dry_run_runs_preflight(sandbox, tmp_path):
+    """缺部署必需组件时，dry-run 也必须失败（否则预演无意义）。"""
+    env, home = sandbox
+    env = dict(env)
+    env.pop("ZES_CLAUDE_INSTALL", None)
+    src = _make_claude_source(tmp_path)
+    shutil.rmtree(src / "templates")
+
+    proc = _run_claude_installer(src, env, "--dry-run", "--targets", "claude-code")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, "缺 templates/ 的 dry-run 仍 rc=0（跳过预检）：%s" % out[-600:]
+    assert "preflight" in out or "templates" in out, "失败原因未指明缺失组件：%s" % out[-600:]
+    assert "安装完成" not in out
+
+
+def test_claude_install_fails_when_plugin_not_enabled(sandbox, tmp_path):
+    """注册成功但 enabledPlugins 未写入 → rc≠0，且不打印「安装完成」（I6）。"""
+    env, home = sandbox
+    env = dict(env)
+    env.pop("ZES_CLAUDE_INSTALL", None)
+    fake_bin = _install_fake_claude(tmp_path / "fakebin-noenable", enable=False)
+    env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
+
+    src = _make_claude_source(tmp_path)
+    proc = _run_claude_installer(src, env, "--targets", "claude-code")
+    out = proc.stdout + proc.stderr
+
+    assert proc.returncode != 0, "插件未启用却 rc=0（假成功）：%s" % out[-1000:]
+    installed = read_json(home / ".claude" / "plugins" / "installed_plugins.json")
+    assert "zcode-expert-system@zcode-local" in installed.get("plugins", {})
+    assert "未启用" in out, "未提示「已注册但未启用」：%s" % out[-1000:]
+    assert "安装完成" not in out, "未启用仍打印「安装完成」：%s" % out[-1000:]
+
+
+# ===========================================================================
+# v3.2.5 部署完整性校验：运行时组件缺一不可，缺失必须报错（不得只警告）
+#
+# 抓的破坏：v3.2.4 及以前安装器只校验 agents 数量。`scripts/workflow_check.py`
+# 缺失（/wf:* 命令的机械核对入口）、`config/categories.json` 的 description
+# 缺项（类目语义画像失效）、`templates/` `references/` 未随包分发时，
+# 安装器仍然打印「部署完成」——用户拿到的是一个跑不起来的插件。
+# ===========================================================================
+
+RUNTIME_FILES = (
+    "scripts/workflow_check.py",
+    "config/categories.json",
+    "config/experts.json",
+    "config/workflow.json",
+    "SKILL.md",
+    "zcode_dev_workflow.py",
+    "zcode_expert_system.py",
+    "skill_entry.py",
+)
+RUNTIME_DIRS = ("templates", "references", "agents", "commands", "hooks")
+
+
+def assert_runtime_components(root, host):
+    """断言部署副本带齐全部运行时组件，且 32 类 description 可读。"""
+    missing = [rel for rel in RUNTIME_FILES + RUNTIME_DIRS
+               if not (root / rel).exists()]
+    assert not missing, "%s 部署副本缺运行时组件：%s（%s）" % (host, missing, root)
+    cats = json.loads((root / "config" / "categories.json").read_text(encoding="utf-8"))
+    assert len(cats) == 32, "%s 的 categories.json 分类数为 %d（应为 32）" % (host, len(cats))
+    no_desc = [k for k, v in cats.items()
+               if not str((v or {}).get("description") or "").strip()]
+    assert not no_desc, "%s 的 categories.json 有分类缺 description：%s" % (host, no_desc)
+
+
+def test_zcode_deployed_skill_has_runtime_components(sandbox, tmp_path):
+    """ZCode 安装后，技能目录与插件缓存技能都必须带齐运行时组件。"""
+    env, home = sandbox
+    src = make_source(tmp_path)
+    proc = run_installer(src, env, "--targets", "zcode")
+    assert proc.returncode == 0, (proc.stdout + proc.stderr)[-800:]
+
+    assert_runtime_components(zcode(home) / "skills" / "zcode-expert-system", "ZCode 技能目录")
+    cache_skill = (zcode(home) / "cli" / "plugins" / "cache" / "zcode-plugins-official"
+                   / "zcode-expert-system")
+    versions = [p for p in cache_skill.iterdir() if p.is_dir()] if cache_skill.exists() else []
+    assert versions, "插件缓存未生成版本目录：%s" % cache_skill
+    assert_runtime_components(versions[0] / "skills" / "zcode-expert-system",
+                              "ZCode 插件缓存技能")
+
+    assert "部署校验通过" in (proc.stdout + proc.stderr), (
+        "安装器未打印部署校验结论——校验可能没接上")
+
+
+def test_missing_workflow_check_fails_before_touching_disk(sandbox, tmp_path):
+    """源树缺 scripts/workflow_check.py 时预检必须 fail-closed 且零写入。"""
+    env, home = sandbox
+    src = make_source(tmp_path)
+    (src / "scripts" / "workflow_check.py").unlink()
+
+    proc = run_installer(src, env, "--targets", "zcode")
+    assert proc.returncode != 0, "缺 workflow_check.py 应当失败，实际 rc=0"
+    out = proc.stdout + proc.stderr
+    assert "workflow_check.py" in out, "失败原因未指出缺失组件：%s" % out[-400:]
+    assert "部署完成" not in out, "缺组件仍打印「部署完成」——静默成功"
+    leftovers = [p for p in zcode(home).rglob("*") if p.is_file()]
+    assert not leftovers, "预检失败后仍留下 %d 个文件" % len(leftovers)
+
+
+def test_missing_category_description_fails_install(sandbox, tmp_path):
+    """32 类 description 缺项必须在预检阶段拦下（类目画像会失效）。"""
+    env, home = sandbox
+    src = make_source(tmp_path)
+    cats_path = src / "config" / "categories.json"
+    cats = json.loads(cats_path.read_text(encoding="utf-8"))
+    cats["frontend-client"].pop("description", None)
+    cats_path.write_text(json.dumps(cats, ensure_ascii=False), encoding="utf-8")
+
+    proc = run_installer(src, env, "--targets", "zcode")
+    assert proc.returncode != 0, "description 缺项应当失败，实际 rc=0"
+    assert "description" in (proc.stdout + proc.stderr), "未指出 description 缺失"
+    leftovers = [p for p in zcode(home).rglob("*") if p.is_file()]
+    assert not leftovers, "预检失败后仍留下 %d 个文件（半毁）" % len(leftovers)
+
+
+def test_claude_marketplace_has_runtime_components(sandbox, tmp_path):
+    """Claude Code marketplace 副本必须带 workflow_check/categories/templates/references。"""
+    env, home = sandbox
+    env = dict(env)
+    env.pop("ZES_CLAUDE_INSTALL", None)
+    fake_bin = _install_fake_claude(tmp_path / "fakebin-runtime")
+    env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
+
+    src = make_source(tmp_path)
+    for rel in ("bin", "context"):
+        shutil.copytree(PROJECT_ROOT / rel, src / rel)
+
+    proc = run_installer(src, env, "--targets", "claude-code")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out[-1000:]
+
+    plugin = (home / ".claude" / "plugins" / "marketplaces" / "zcode-local"
+              / "zcode-expert-system")
+    assert (plugin / "scripts" / "workflow_check.py").is_file(), \
+        "marketplace 副本缺 scripts/workflow_check.py（/wf:* 命令会落空）"
+    assert (plugin / "config" / "categories.json").is_file(), \
+        "marketplace 副本缺 config/categories.json（类目画像失效）"
+    assert (plugin / "templates").is_dir(), "marketplace 副本缺 templates/"
+    assert (plugin / "references").is_dir(), "marketplace 副本缺 references/"
+    assert (plugin / "context").is_dir(), "marketplace 副本缺 context/"
+    assert (plugin / "bin").is_dir(), "marketplace 副本缺 bin/"
+    assert_runtime_components(plugin, "Claude Code marketplace")
+    assert "部署校验通过" in out or "验证通过" in out, "未打印校验结论"

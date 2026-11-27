@@ -97,6 +97,35 @@ def test_异常时返回失败并带traceback(monkeypatch):
     assert "traceback" in out, "应带 traceback 便于排查"
 
 
+def test_forward_task_id_and_persist(monkeypatch):
+    """context 中的 task_id / persist 必须真正传给域路由。"""
+    captured = {}
+
+    def _fake(task, task_id=None, persist=True):
+        captured.update(task=task, task_id=task_id, persist=persist)
+        return {
+            "category": "backend-architecture",
+            "confidence": 1.0,
+            "alternatives": [],
+            "routing_warning": "x",
+            "semantic_selection_required": True,
+            "selection_basis": "heuristic",
+            "manager_id": "manager-backend-architecture",
+            "selected_expert": {"id": "expert-x", "name": "后端架构师"},
+            "top_candidates": [],
+            "manager_result": {},
+            "expert_result": {},
+            "context": {"task_id": task_id},
+        }
+
+    monkeypatch.setattr(skill_entry, "zcode_expert_system", _fake)
+    out = skill_entry.handle_skill_invoke(
+        "分析登录接口", context={"task_id": "t-42", "persist": False})
+    assert out["success"] is True
+    assert captured == {
+        "task": "分析登录接口", "task_id": "t-42", "persist": False}
+
+
 def test_批量调用逐任务返回():
     """handle_skill_invoke_batch 逐任务返回，结构与单次一致。"""
     out = skill_entry.handle_skill_invoke_batch(

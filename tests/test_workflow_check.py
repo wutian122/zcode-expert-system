@@ -50,6 +50,7 @@ x
 
 ## Review
 independence: L0
+implementer: 软件架构师
 reviewer: 代码审查员
 
 ## Rulings
@@ -101,6 +102,16 @@ def build_project(root: Path, with_delta_spec=True, done=True):
                 "| 任务名 | 夹具 |\n"
                 "| 领域（category） | backend-architecture |\n"
                 "| 专家（name/basis） | 软件架构师（semantic） |\n\n"
+                # G5/G6 派发证据：完成态必须有 implementer/reviewer 派发行
+                "## Dispatches\n\n"
+                "dispatch 1 role=implementer agent=\"软件架构师\" "
+                "category=backend-architecture instance=1 base=abc123 "
+                "brief=.superpowers/sdd/p/task-1-brief.md "
+                "report=.superpowers/sdd/p/task-1-report.md changeset=-\n"
+                "dispatch 1 role=reviewer agent=\"代码审查员\" "
+                "category=engineering-quality instance=1 base=abc123 "
+                "brief=.superpowers/sdd/p/task-1-brief.md "
+                "report=.superpowers/sdd/p/review-1.md changeset=-\n\n"
                 "Task 1: complete (abc123)\n")
     _safe_write(root, ".superpowers/sdd/p/task-1-brief.md", "brief\n")
     _safe_write(root, ".superpowers/sdd/p/task-1-report.md", "report\n")

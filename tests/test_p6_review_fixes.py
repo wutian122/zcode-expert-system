@@ -47,6 +47,8 @@ PLAN = """### Task 1: a
 x
 ## Review
 independence: L0
+implementer: 软件架构师
+reviewer: 代码审查员
 spec: \u2705
 ## Rulings
 x
@@ -71,6 +73,17 @@ x
 """
 
 DEFAULT_LEDGER = ("# SDD ledger — plan: docs/p.md\n\n"
+                  # G5/G6 派发证据（dispatch 门禁）：完成态必须有
+                  # implementer/reviewer 派发行
+                  "## Dispatches\n\n"
+                  "dispatch 1 role=implementer agent=\"软件架构师\" "
+                  "category=backend-architecture instance=1 base=abc "
+                  "brief=.superpowers/sdd/p/task-1-brief.md "
+                  "report=.superpowers/sdd/p/task-1-report.md changeset=-\n"
+                  "dispatch 1 role=reviewer agent=\"代码审查员\" "
+                  "category=engineering-quality instance=1 base=abc "
+                  "brief=.superpowers/sdd/p/task-1-brief.md "
+                  "report=.superpowers/sdd/p/review-1.md changeset=-\n\n"
                   "independence: L0\nTask 1: complete (abc)\n")
 
 

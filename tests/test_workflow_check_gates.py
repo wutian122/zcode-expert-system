@@ -66,6 +66,7 @@ x
 
 ## Review
 independence: L0
+implementer: 软件架构师
 reviewer: 代码审查员
 
 ## Rulings
@@ -83,6 +84,19 @@ do a
 PLAN_REL = "docs/superpowers/plans/p.md"
 LEDGER_REL = ".superpowers/sdd/p/progress.md"
 LEDGER_HEAD = "# SDD ledger — plan: docs/superpowers/plans/p.md\n\n"
+
+# G5/G6 派发证据（dispatch 门禁）：完成态必须有 implementer/reviewer 派发行，
+# 专家名与 category 必须与 config/experts.json 一致。
+DISPATCHES = (
+    "## Dispatches\n\n"
+    "dispatch 1 role=implementer agent=\"软件架构师\" "
+    "category=backend-architecture instance=1 base=abc123 "
+    "brief=.superpowers/sdd/p/task-1-brief.md "
+    "report=.superpowers/sdd/p/task-1-report.md changeset=-\n"
+    "dispatch 1 role=reviewer agent=\"代码审查员\" "
+    "category=engineering-quality instance=1 base=abc123 "
+    "brief=.superpowers/sdd/p/task-1-brief.md "
+    "report=.superpowers/sdd/p/review-1.md changeset=-\n\n")
 
 
 def _safe_write(root, rel, content):
@@ -110,7 +124,7 @@ def build(root, *, tasks="- [x] 1.1 alpha\n", ledger=None, plan=PLAN_FULL,
         _safe_write(root, PLAN_REL, plan)
     if workspace:
         _safe_write(root, LEDGER_REL,
-                    (ledger if ledger is not None else LEDGER_HEAD +
+                    (ledger if ledger is not None else LEDGER_HEAD + DISPATCHES +
                      "independence: L0\nTask 1: complete (abc123)\n"))
         _safe_write(root, ".superpowers/sdd/p/task-1-brief.md", "brief\n")
         _safe_write(root, ".superpowers/sdd/p/task-1-report.md", "report\n")
@@ -409,7 +423,9 @@ def test_review_focus_does_not_satisfy_review_section(proj):
     修前实测：计划里只有 `## Review Focus: reviewer 只看 correctness`
     → `[ OK ] 审查结论已持久化`。即用 S3 的「计划必备段」冒充了 S6 的「审查结论证据」。
     """
-    plan = PLAN_FULL.replace("## Review\nindependence: L0\nreviewer: 代码审查员\n", "")
+    plan = PLAN_FULL.replace(
+        "## Review\nindependence: L0\nimplementer: 软件架构师\n"
+        "reviewer: 代码审查员\n", "")
     build(proj, plan=plan)
     item = run_status(proj, "审查结论")
     assert item["status"] != wc.OK, (
@@ -759,3 +775,221 @@ def test_s8_parked_status_json_false_但账本有PARKED须FAIL(proj):
         "不得被 .status.json 单点口径漏判\n"
         f"实际：{s8_parked[0]['status']} detail={s8_parked[0].get('detail','')}"
     )
+
+
+# ---------------------------------------------------------------------------
+# J. S1.DESIGN_LEAK：本次新增判据与严重度
+#
+# 旧实现只认「文件名含当天日期」，未带日期的设计文件直接漏检；
+# 命中后也只 WARN，不触发 rc≠0。以下用例锁定新语义：
+#   - 本次新增 = 文件名含 today OR mtime 日期 == today，再排除 git tracked
+#   - medium/large/非法规模命中即 FAIL（design_not_allowed）
+#   - light/bug 缺「非权威」标注或不可读 → FAIL
+# ---------------------------------------------------------------------------
+
+def _green(root):
+    """补齐与 S1 无关的两处既有 FAIL，让 S1 的 rc 断言只反映 S1。"""
+    _safe_write(root, LEDGER_REL,
+                LEDGER_HEAD
+                + "## Triage\n\n| 项 | 值 |\n|---|---|\n"
+                + "| 任务名 | x |\n"
+                + "| 领域（category） | backend-architecture |\n"
+                + "| 专家（name/basis） | 软件架构师（semantic） |\n\n"
+                + DISPATCHES
+                + "independence: L0\nTask 1: complete (abc123)\n")
+    _safe_write(root, ".superpowers/sdd/p/review-1.md",
+                "VERDICT: APPROVED\nINDEPENDENCE: L0\n")
+
+
+def _s1_item(rep):
+    hits = [i for i in rep.items if i.get("id") == "S1.DESIGN_LEAK"]
+    assert hits, "S1.DESIGN_LEAK 检查项必须产出"
+    return hits[0]
+
+
+def test_s1_medium_flags_undated_today_file(proj):
+    """medium 任务：文件名不带日期、但今天创建的 design 文件必须 FAIL。
+
+    修前实测：`S1-order-query-api-design.md` 不含 today，stale 为空 → OK。
+    """
+    build(proj)
+    _green(proj)
+    _safe_write(proj, "docs/superpowers/specs/S1-order-query-api-design.md",
+                "非权威：本文件不承载验收\n")
+    rep, _ = runp(proj, scale="medium")
+    item = _s1_item(rep)
+    assert item["status"] == wc.FAIL, (
+        "medium 下今天创建的未带日期 design 文件必须 FAIL，实际 %s" % item["status"])
+    assert item.get("reason") == "design_not_allowed", item.get("reason")
+    assert "S1-order-query-api-design.md" in item.get("detail", "")
+
+
+def test_s1_medium_flags_marked_file(proj):
+    """medium 任务：即使标了「非权威」，S1 也不允许落盘。"""
+    build(proj)
+    _green(proj)
+    _safe_write(proj, "docs/superpowers/specs/undated.design.md",
+                "非权威：本文件不承载验收\n")
+    rep, _ = runp(proj, scale="medium")
+    item = _s1_item(rep)
+    assert item["status"] == wc.FAIL
+    assert item.get("reason") == "design_not_allowed"
+
+
+def test_s1_medium_leak_exits_nonzero(proj):
+    """S1 违规必须让 workflow_check rc=1，不得只 WARN。"""
+    build(proj)
+    _green(proj)
+    _safe_write(proj, "docs/superpowers/specs/undated.design.md",
+                "非权威：本文件不承载验收\n")
+    rc = wc.main(["--root", str(proj), "--change", "demo",
+                  "--plan", PLAN_REL, "--scale", "medium"])
+    assert rc == 1, "S1 违规时 rc 必须为 1，实际 %d" % rc
+
+
+def test_s1_light_marked_file_ok(proj):
+    """light 任务：落盘但首段标注「非权威」是合法路径。"""
+    build(proj)
+    _green(proj)
+    _safe_write(proj, "docs/superpowers/specs/undated.design.md",
+                "非权威：本文件不承载验收\n")
+    rep, _ = runp(proj, scale="light")
+    item = _s1_item(rep)
+    assert item["status"] == wc.OK, (
+        "light 且已标注非权威时应 OK，实际 %s（detail=%s）"
+        % (item["status"], item.get("detail")))
+
+
+def test_s1_light_unmarked_fails(proj):
+    """light 任务：落盘但缺「非权威」标注必须 FAIL。"""
+    build(proj)
+    _green(proj)
+    _safe_write(proj, "docs/superpowers/specs/undated.design.md", "设计内容\n")
+    rep, _ = runp(proj, scale="light")
+    item = _s1_item(rep)
+    assert item["status"] == wc.FAIL
+    assert item.get("reason") == "design_not_marked"
+
+
+def test_s1_historical_mtime_ignored(proj):
+    """历史 design 文件（mtime 早于今天）不得被判成本次违规。"""
+    build(proj)
+    _green(proj)
+    old = _safe_write(proj, "docs/superpowers/specs/old-redesign.md", "历史设计\n")
+    old_ts = 1704067200  # 2024-01-01
+    os.utime(str(old), (old_ts, old_ts))
+    rep, _ = runp(proj, scale="medium")
+    item = _s1_item(rep)
+    assert item["status"] == wc.OK, (
+        "历史 design 文件被误判为本次违规：%s" % item.get("detail"))
+
+
+def test_s1_git_tracked_today_mtime_ignored(proj):
+    """git 已跟踪文件即使 mtime 被刷成今天，也不得算「本次新增」。
+
+    防的是 fresh clone / checkout 当天，所有历史 tracked 文件 mtime 都是今天。
+    """
+    if shutil.which("git") is None:
+        pytest.skip("环境无 git")
+    build(proj)
+    _green(proj)
+    path = _safe_write(proj, "docs/superpowers/specs/tracked.design.md", "历史设计\n")
+    rel = str(path.relative_to(proj)).replace("\\", "/")
+    for cmd in (
+        ["git", "-C", str(proj), "init", "-q"],
+        ["git", "-C", str(proj), "add", "--", rel],
+        ["git", "-C", str(proj), "-c", "user.name=Test",
+         "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false",
+         "commit", "-q", "-m", "seed"],
+    ):
+        r = __import__("subprocess").run(cmd, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+    now = __import__("time").time()
+    os.utime(str(path), (now, now))
+    rep, _ = runp(proj, scale="medium")
+    item = _s1_item(rep)
+    assert item["status"] == wc.OK, (
+        "git tracked 文件被误判为本次新增：%s" % item.get("detail"))
+
+
+def test_s1_unreadable_candidate_fails(proj, monkeypatch):
+    """候选文件读不出时不得静默放过，必须 FAIL 并标明不可读。"""
+    build(proj)
+    _green(proj)
+    _safe_write(proj, "docs/superpowers/specs/undated.design.md",
+                "非权威：本文件不承载验收\n")
+    monkeypatch.setattr(wc, "read", lambda p: None)
+    rep, _ = runp(proj, scale="light")
+    item = _s1_item(rep)
+    assert item["status"] == wc.FAIL
+    assert item.get("reason") == "unverifiable:spec_unreadable"
+
+
+# ---------------------------------------------------------------------------
+# K. Bug 专项证据落 P3：## Bug Investigation
+# ---------------------------------------------------------------------------
+
+BUG_EVIDENCE_TEXT = """
+
+## Bug Investigation
+
+### 入口分诊
+代码逻辑 Bug
+
+### 根因调查
+根因：空指针；复现命令 rc=1
+
+### 假设三段
+假设：X 是根因；预期证据 A；最小检验 B
+
+### 分级与方案
+分级：🟠 严重；方案 A / 方案 B；副作用自查完成
+
+### 双确认
+老板选择 A，原话「执行」
+
+### TDD 复现
+RED 输出 rc=1
+
+### red-green 复验
+GREEN → RED → GREEN
+
+### 全量回归
+736 passed, 1 skipped，无本次引入失败
+"""
+
+
+def test_bug_plan_requires_bug_investigation_section(proj):
+    """bug 规模必须有 ## Bug Investigation，不能只把证据留在会话。"""
+    build(proj)
+    _green(proj)
+    rep, _ = runp(proj, scale="bug")
+    item = [i for i in rep.items
+            if i.get("id") == "S3.SECTION:Bug Investigation"]
+    assert item, "bug 规模必须产出 S3.SECTION:Bug Investigation 检查项"
+    assert item[0]["status"] == wc.FAIL
+    assert item[0].get("reason") == "missing:section"
+
+
+def test_bug_plan_with_evidence_section_is_ok(proj):
+    """补齐 P3 关键证据后，S3 必须转 OK。"""
+    build(proj, plan=PLAN_FULL + BUG_EVIDENCE_TEXT)
+    _green(proj)
+    rep, _ = runp(proj, scale="bug")
+    sec = [i for i in rep.items
+           if i.get("id") == "S3.SECTION:Bug Investigation"]
+    ev = [i for i in rep.items if i.get("id") == "S3.BUG_EVIDENCE"]
+    assert sec and sec[0]["status"] == wc.OK
+    assert ev and ev[0]["status"] == wc.OK, (
+        "Bug 证据段存在但关键证据词缺失：%s"
+        % (ev[0].get("detail") if ev else "无 S3.BUG_EVIDENCE"))
+
+
+def test_bug_plan_with_empty_evidence_section_fails(proj):
+    """只有空标题、没有关键证据时，仍必须 FAIL。"""
+    build(proj, plan=PLAN_FULL + "\n## Bug Investigation\n\n只有标题\n")
+    _green(proj)
+    rep, _ = runp(proj, scale="bug")
+    ev = [i for i in rep.items if i.get("id") == "S3.BUG_EVIDENCE"]
+    assert ev and ev[0]["status"] == wc.FAIL
+    assert ev[0].get("reason") == "missing:bug_evidence"

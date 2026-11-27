@@ -52,11 +52,16 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts import workflow_check as wc  # noqa: E402
 
+REVIEW_HEAD = ("## Review\nindependence: L0\nimplementer: 软件架构师\n"
+               "reviewer: 代码审查员\n")
+
 PLAN = """### Task 1: a
 ## Baseline
 x
 ## Review
 independence: L0
+implementer: 软件架构师
+reviewer: 代码审查员
 spec: \u2705
 ## Rulings
 x
@@ -102,7 +107,18 @@ def proj(tmp_path):
         "## Purpose\n认证主规格\n", encoding="utf-8", newline="")
     (tmp_path / "docs/p.md").write_text(PLAN, encoding="utf-8", newline="")
     (tmp_path / ".superpowers/sdd/p/progress.md").write_text(
-        "# SDD ledger — plan: docs/p.md\n\nindependence: L0\n"
+        "# SDD ledger — plan: docs/p.md\n\n"
+        # G5/G6 派发证据（dispatch 门禁）：完成态必须有 implementer/reviewer 派发行
+        "## Dispatches\n\n"
+        "dispatch 1 role=implementer agent=\"软件架构师\" "
+        "category=backend-architecture instance=1 base=abc "
+        "brief=.superpowers/sdd/p/task-1-brief.md "
+        "report=.superpowers/sdd/p/task-1-report.md changeset=-\n"
+        "dispatch 1 role=reviewer agent=\"代码审查员\" "
+        "category=engineering-quality instance=1 base=abc "
+        "brief=.superpowers/sdd/p/task-1-brief.md "
+        "report=.superpowers/sdd/p/review-1.md changeset=-\n\n"
+        "independence: L0\n"
         "Task 1: complete (abc)\n", encoding="utf-8", newline="")
     (tmp_path / ".superpowers/sdd/p/task-1-brief.md").write_text(
         "b\n", encoding="utf-8", newline="")
@@ -282,7 +298,7 @@ def test_independence_in_table_is_recognized(proj):
         "# SDD ledger — plan: docs/p.md\n\nTask 1: complete (abc)\n",
         encoding="utf-8", newline="")
     (proj / "docs/p.md").write_text(
-        PLAN.replace("## Review\nindependence: L0\n",
+        PLAN.replace(REVIEW_HEAD,
                      "## Review\n| 项 | 值 |\n|---|---|\n| independence | L0 |\n"),
         encoding="utf-8", newline="")
     rep, _ = wc.run(change="demo", plan="docs/p.md", scale="medium", root=str(proj))
@@ -301,7 +317,7 @@ def test_independence_l2_in_table_still_fails(proj):
         "# SDD ledger — plan: docs/p.md\n\nTask 1: complete (abc)\n",
         encoding="utf-8", newline="")
     (proj / "docs/p.md").write_text(
-        PLAN.replace("## Review\nindependence: L0\n",
+        PLAN.replace(REVIEW_HEAD,
                      "## Review\n| 项 | 值 |\n|---|---|\n| independence | L2 |\n"),
         encoding="utf-8", newline="")
     rep, _ = wc.run(change="demo", plan="docs/p.md", scale="medium", root=str(proj))
@@ -317,7 +333,7 @@ def test_quoted_marker_in_code_span_still_ignored(proj):
     历史引用时，不能被当成真实标记——否则记录了修复过程的文档反而被判 L2。
     """
     (proj / "docs/p.md").write_text(
-        PLAN.replace("## Review\nindependence: L0\n",
+        PLAN.replace(REVIEW_HEAD,
                      "## Review\n修前实测：`independence: L2` 曾被误判。\n"
                      "independence: L0\n"),
         encoding="utf-8", newline="")
@@ -339,7 +355,7 @@ def test_table_without_independence_key_not_matched(proj):
         "# SDD ledger — plan: docs/p.md\n\nTask 1: complete (abc)\n",
         encoding="utf-8", newline="")
     (proj / "docs/p.md").write_text(
-        PLAN.replace("## Review\nindependence: L0\n",
+        PLAN.replace(REVIEW_HEAD,
                      "## Review\n| 级别 | 含义 |\n|---|---|\n| L0 | 独立审查 |\n"),
         encoding="utf-8", newline="")
     rep, _ = wc.run(change="demo", plan="docs/p.md", scale="medium", root=str(proj))

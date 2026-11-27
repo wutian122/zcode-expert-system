@@ -187,6 +187,50 @@ def test_sync_specs_ADDED段落合并(tmp_path):
     )
 
 
+def test_sync_specs_新能力无Purpose时补TBD并可通过validate(tmp_path):
+    """F-3：新能力第一次 sync 必须生成非空 Purpose，validate-specs 立即通过。"""
+    run("new-change", "new-cap", root=tmp_path)
+    cdir = tmp_path / "openspec" / "changes" / "new-cap"
+    spec_dir = cdir / "specs" / "billing"
+    spec_dir.mkdir(parents=True)
+    (spec_dir / "spec.md").write_text(
+        "## ADDED Requirements\n- 支持账单导出\n", encoding="utf-8")
+
+    r = run("sync-specs", "--change", "new-cap", root=tmp_path)
+    assert r.returncode == 0, r.stderr
+    data = json.loads(r.stdout)
+    assert data["purpose"] == "placeholder"
+    assert data["purpose_placeholder"] is True
+    merged = (tmp_path / "openspec" / "specs" / "billing" / "spec.md").read_text(
+        encoding="utf-8")
+    assert "## Purpose" in merged
+    assert "TBD" in merged
+
+    v = run("validate-specs", root=tmp_path)
+    assert v.returncode == 0, v.stdout + v.stderr
+    assert json.loads(v.stdout)["valid"] is True
+
+
+def test_sync_specs_新能力复制deltaPurpose(tmp_path):
+    """F-3：delta 自带 Purpose 时必须原样复制到新主 spec。"""
+    run("new-change", "new-cap", root=tmp_path)
+    cdir = tmp_path / "openspec" / "changes" / "new-cap"
+    spec_dir = cdir / "specs" / "billing"
+    spec_dir.mkdir(parents=True)
+    (spec_dir / "spec.md").write_text(
+        "## Purpose\n账单与发票能力\n\n## ADDED Requirements\n- 支持账单导出\n",
+        encoding="utf-8")
+
+    r = run("sync-specs", "--change", "new-cap", root=tmp_path)
+    assert r.returncode == 0, r.stderr
+    data = json.loads(r.stdout)
+    assert data["purpose"] == "delta"
+    merged = (tmp_path / "openspec" / "specs" / "billing" / "spec.md").read_text(
+        encoding="utf-8")
+    assert "## Purpose\n账单与发票能力" in merged
+    assert "TBD" not in merged
+
+
 def test_sync_specs_REMOVED整块移除(tmp_path):
     """P2-1（老板批准 2026-11-18）：REMOVED 段落按设计文档改为「整块移除」。
 

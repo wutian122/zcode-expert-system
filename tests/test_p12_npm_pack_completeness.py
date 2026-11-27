@@ -49,6 +49,7 @@ REQUIRED_PACKED = [
     "scripts/install.js",
     "scripts/install-claude-code.js",
     "scripts/cc-uninstall.js",
+    "scripts/install-qoder.js",
     "scripts/target-menu.js",
     "scripts/openspec_engine.py",
     "scripts/workflow_check.py",

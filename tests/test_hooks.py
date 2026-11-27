@@ -458,6 +458,8 @@ def test_reminder_forbids_skipping_domain_routing():
         "旧机械豁免整句（可用 general-purpose 或 Explore）必须删除")
     assert "双轴合一" in ctx, "triage 双轴合一口径必须写入（D2，修先域后规模顺序矛盾）"
     assert "analyst" in ctx, "只读任务派 analyst 的口径必须写入（D3）"
+    assert "仅允许查看" in ctx, "只读任务只允许查看类工具的口径必须写入"
+    assert "禁止新增、删除、修改" in ctx, "只读任务禁止增删改的口径必须写入"
     assert "记 Ruling" in ctx, "老板明示豁免须记 Ruling 的口径必须写入（W10）"
 
 

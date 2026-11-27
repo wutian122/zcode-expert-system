@@ -55,6 +55,8 @@ PLAN_FULL = """### Task 1: a
 x
 ## Review
 independence: L0
+implementer: 软件架构师
+reviewer: 代码审查员
 spec: \u2705
 ## Rulings
 x
@@ -99,7 +101,19 @@ def proj(tmp_path):
         "x\n", encoding="utf-8", newline="")
     (tmp_path / "docs/p.md").write_text(PLAN_FULL, encoding="utf-8", newline="")
     (tmp_path / ".superpowers/sdd/p/progress.md").write_text(
-        "# SDD ledger — plan: docs/p.md\n\nindependence: L0\n"
+        "# SDD ledger — plan: docs/p.md\n\n"
+        "## Dispatches\n\n"
+        # G5/G6 派发证据（dispatch 门禁）：完成态必须有 implementer/reviewer
+        # 派发行，专家名与 category 必须与 config/experts.json 一致。
+        "dispatch 1 role=implementer agent=\"软件架构师\" "
+        "category=backend-architecture instance=1 base=abc123 "
+        "brief=.superpowers/sdd/p/task-1-brief.md "
+        "report=.superpowers/sdd/p/task-1-report.md changeset=-\n"
+        "dispatch 1 role=reviewer agent=\"代码审查员\" "
+        "category=engineering-quality instance=1 base=abc123 "
+        "brief=.superpowers/sdd/p/task-1-brief.md "
+        "report=.superpowers/sdd/p/review-1.md changeset=-\n\n"
+        "independence: L0\n"
         "Task 1: complete (abc)\n", encoding="utf-8", newline="")
     (tmp_path / ".superpowers/sdd/p/task-1-brief.md").write_text(
         "b\n", encoding="utf-8", newline="")

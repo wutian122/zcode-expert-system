@@ -66,6 +66,9 @@ MUST_BE_WRITE = [
     ("帮我处置一下这个告警", "处置一下 = 执行动作，不得判只读"),
     ("处置一下这个告警", "处置一下 = 执行动作，不得判只读"),
     ("应急处置一下", "处置一下 = 执行动作，不得判只读"),
+    # 批次 2 回归：解释意图只能抑制被解释的动词，不能吞掉真正的实施动作。
+    ("修改登录逻辑，并解释原因", "修改在前 = 实施任务，不得因后置「解释」判只读"),
+    ("调整配置，并说明影响", "调整在前 = 实施任务，不得因后置「说明」判只读"),
 ]
 
 
@@ -218,3 +221,45 @@ def test_zero_width_chars_do_not_bypass_bug_detection(text):
     r = wf.classify_scale(text)
     assert r["scale"] == "bug", (
         "零宽字符绕过了 Bug 判定：「%r」实际 %s" % (text, r["scale"]))
+
+
+# ---------------------------------------------------------------------------
+# 批次 1：元语言 / 意图 / 修复自证
+# ---------------------------------------------------------------------------
+
+EXPLAIN_META_TASKS = [
+    "说明 Bug 与失败的区别",
+    "解释一下 Bug 与失败的区别",
+    "说明修复流程",
+    "只读说明轻量任务流程，包括 Bug/失败场景",
+    "说明 “Bug/失败” 的判定",
+    "讲解一下失败场景的判定标准",
+]
+
+
+@pytest.mark.parametrize("text", EXPLAIN_META_TASKS)
+def test_explain_meta_tasks_are_readonly(text):
+    """说明/解释类任务不得因为提到 Bug/失败而被判 Bug。"""
+    r = wf.classify_scale(text)
+    assert r["scale"] == "readonly", (
+        "「%s」被判 %s（应 readonly）；reasons=%s"
+        % (text, r["scale"], r.get("reasons")))
+
+
+@pytest.mark.parametrize("text", [
+    "修复 README 里的错别字",
+    "修正文档里的错别字",
+])
+def test_fix_without_fault_signal_not_bug(text):
+    """只有修复动词、没有第二个故障信号时，不得自证成 Bug。"""
+    r = wf.classify_scale(text)
+    assert r["scale"] != "bug", (
+        "「%s」仅命中修复动词却被判 Bug；reasons=%s"
+        % (text, r.get("reasons")))
+
+
+def test_quoted_real_object_still_detected_as_bug():
+    """引号里是真实故障对象时，元语言清洗不得把 Bug 吞掉。"""
+    r = wf.classify_scale('修复「登录页」白屏')
+    assert r["scale"] == "bug", (
+        "引号内真实故障对象被清洗后漏判 Bug；reasons=%s" % r.get("reasons"))

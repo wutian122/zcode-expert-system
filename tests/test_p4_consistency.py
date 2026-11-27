@@ -87,7 +87,8 @@ def test_plan_template_covers_all_evidence_sections():
     两者都必须在同一个模板里，否则用户填完必备段仍会在后续门禁撞墙。
     """
     tpl = read("templates/plan-sections.md")
-    for sec in ("Baseline", "Review", "Rulings", "Integration Verification"):
+    for sec in ("Bug Investigation", "Baseline", "Review", "Rulings",
+                "Integration Verification"):
         assert re.search(r"^#{1,6}[ \t]+%s[ \t]*$" % re.escape(sec), tpl, re.M), (
             "模板缺证据段 `## %s`" % sec)
 
@@ -177,7 +178,12 @@ def test_version_strings_agree():
     """
     versions = {
         "package.json": load_json("package.json")["version"],
+        "package-lock.json": load_json("package-lock.json")["version"],
+        "package-lock.json(packages[''])": load_json("package-lock.json")["packages"][""]["version"],
         ".zcode-plugin/plugin.json": load_json(".zcode-plugin/plugin.json")["version"],
+        ".claude-plugin/plugin.json": load_json(".claude-plugin/plugin.json")["version"],
+        ".claude-plugin/marketplace.json": load_json(
+            ".claude-plugin/marketplace.json")["plugins"][0]["version"],
         "config/workflow.json": load_json("config/workflow.json")["version"],
         "SKILL.md": re.search(r"^version:\s*\"?([\d.]+)",
                               read("SKILL.md"), re.M).group(1),

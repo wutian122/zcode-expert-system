@@ -186,9 +186,12 @@ def test_warning_mentions_missing_expert():
 
 
 def test_confidence_and_alternatives_consistent():
-    """置信度与备选语义自洽（伪并列防回归）。"""
+    """置信度与备选语义自洽（新契约）。"""
     for text in ("把数据库慢查询优化一下", "训练一个大模型做rag", "实现用户登录接口"):
-        _cat, conf, alts = zes.classify_task_detailed(text)
-        assert not (conf < 1.0 and not alts), (
-            "「%s」conf=%.3f 但 alts=[] —— 伪并列" % (text, conf)
-        )
+        _cat, conf, alts, detail = zes.classify_task_with_evidence(text)
+        if alts:
+            assert conf < 1.0, "「%s」有备选却给满分置信度" % text
+        if detail["tied"]:
+            assert alts, "「%s」标记 tied 却无备选" % text
+        else:
+            assert not alts, "「%s」无 tied 却有备选" % text

@@ -207,12 +207,18 @@ def test_plan_adds_semantic_recheck_when_required():
     assert "semantic" in joined.lower() or "语义" in joined
 
 
-def test_plan_has_blocking_field_when_recheck_needed():
-    """需要复核时 plan 应有 blocking 说明（便于消费方一眼看出未就绪）。"""
+def test_high_confidence_recheck_does_not_block_dispatch():
+    """高置信度仍需语义复核，但不得同时置 blocking + 派发行。
+
+    旧契约把“语义精判待完成”无条件写成 blocking，导致高置信度任务
+    既 blocking 又派发。新契约：高置信度只要求 semantic_recheck 动作；
+    只有低置信度/低 margin 才 blocking 并阻断派发。
+    """
     p = plan_for("实现用户登录接口", files=5)
     if not p["domain"].get("semantic_selection_required"):
         pytest.skip("本次路由恰好语义确定")
-    assert p.get("blocking"), "语义待复核却无 blocking 说明"
+    assert p.get("semantic_recheck", {}).get("required") is True
+    assert not p.get("blocking"), "高置信度不得同时 blocking + 派发"
 
 
 # ===========================================================================
@@ -391,3 +397,95 @@ def test_root_in_git_repo_keeps_l0(tmp_path, monkeypatch):
     assert reviewer["independence"] == "L0", (
         "P2-4：root 有 git 时 reviewer 应 L0，实际 %s（一刀切降级误伤）"
         % reviewer["independence"])
+
+
+# ===========================================================================
+# P3 证据契约 + 只读工具权限
+# ===========================================================================
+
+def test_bug_plan_declares_p3_evidence(tmp_path):
+    """Bug 规模必须在 plan 中声明 P3 落盘位置与关键证据。"""
+    p = wf.build_dispatch_plan("登录失败", root=str(tmp_path))
+    assert p["scale"]["scale"] == "bug"
+    ev = p.get("p3_evidence") or {}
+    assert ev.get("required") is True
+    assert "Bug Investigation" in str(ev.get("primary"))
+    keys = " ".join(ev.get("key_evidence") or [])
+    for needle in ("根因", "假设", "双确认", "RED", "red-green", "全量回归"):
+        assert needle in keys, "Bug P3 证据清单缺 %r" % needle
+
+
+def test_readonly_plan_exposes_tool_policy():
+    """只读 plan 必须给出工具白名单/黑名单，且 analyst 派发携带同一策略。"""
+    sdd_root = os.path.join(_PROJECT_ROOT, ".superpowers", "sdd")
+    before = set(glob.glob(os.path.join(sdd_root, "dispatch-*")))
+    try:
+        p = wf.build_dispatch_plan("分析一下这个模块的架构")
+        assert p["scale"]["scale"] == "readonly"
+        policy = p.get("tool_policy") or {}
+        assert policy.get("mode") == "readonly"
+        assert (p.get("p3_evidence") or {}).get("required") is False, (
+            "只读任务不写代码，P3 不应强制落盘；dispatch.json 是审计锚点")
+        allowed = " ".join(policy.get("allowed") or [])
+        denied = " ".join(policy.get("denied") or [])
+        assert "Read" in allowed and "Grep" in allowed
+        assert "Write" in denied and "Edit" in denied
+        assert "git add" in denied or "git commit" in denied
+        analysts = [d for d in p["dispatches"] if d.get("role") == "analyst"]
+        assert analysts, "只读任务必须派 analyst"
+        assert analysts[0].get("tool_policy", {}).get("mode") == "readonly"
+        assert "只读工具权限" in analysts[0].get("prompt_prefix", "")
+        roles = {d.get("role") for d in p["dispatches"]}
+        assert "implementer" not in roles and "reviewer" not in roles
+    finally:
+        _cleanup_new_dispatch_dirs(before)
+
+
+def test_nonreadonly_plan_has_p3_contract(tmp_path):
+    """轻/中/大任务也必须显式声明 P3 四段，不能靠口头自觉。"""
+    p = wf.build_dispatch_plan("增加用户登录接口", root=str(tmp_path))
+    assert p["scale"]["scale"] in ("light", "medium", "large")
+    ev = p.get("p3_evidence") or {}
+    assert ev.get("required") is True
+    assert "Baseline" in str(ev.get("primary"))
+    assert "Review" in str(ev.get("primary"))
+    assert "Integration Verification" in str(ev.get("primary"))
+
+
+# ===========================================================================
+# 批次 2：margin 置信度 + 低置信度硬门
+# ===========================================================================
+
+def test_router_meta_task_routes_to_search_relevance(tmp_path):
+    """讨论“专家路由/准确率/误判”时，应路由到搜索相关性，而不是测试域。"""
+    task = "分析为什么专家路由容易按词面误判，并设计提高准确率，包括测试/评估"
+    p = wf.build_dispatch_plan(task, files=5, root=str(tmp_path))
+    assert p["scale"]["scale"] == "readonly"
+    assert p["domain"]["category"] == "data-database", p["domain"].get("confidence_detail")
+    assert p["domain"]["expert_name"] == "搜索相关性工程师", p["domain"]
+    assert p["domain"]["confidence"] >= 0.5
+    roles = [d.get("role") for d in p["dispatches"]]
+    assert "analyst" in roles, "只读任务应派 analyst：%r" % roles
+    assert not p.get("blocking"), "分类已确定，不应误置 blocking"
+
+
+def test_install_meta_task_routes_to_engineering_quality(tmp_path):
+    """“安装注册 + 审计/操作”应归工程效能，而不是财务域。"""
+    task = "修复两类问题：Claude Code 安装注册、审计与操作流程"
+    p = wf.build_dispatch_plan(task, files=5, root=str(tmp_path))
+    assert p["domain"]["category"] == "engineering-quality", p["domain"].get("confidence_detail")
+    assert p["domain"]["confidence"] >= 0.5
+    assert p["domain"].get("expert_name") == "开发者工具工程师", p["domain"].get("expert_name")
+    roles = [d.get("role") for d in p["dispatches"]]
+    assert "implementer" in roles, "非只读任务应派 implementer：%r" % roles
+    assert not p.get("blocking"), "分类已确定，不应误置 blocking"
+
+
+def test_confidence_detail_is_exposed():
+    """路由结果必须暴露 confidence_detail，主控才能判断为何低分。"""
+    r = wf._route_domain("分析为什么专家路由容易按词面误判")
+    domain = r[0]
+    detail = domain.get("confidence_detail") or {}
+    for key in ("evidence", "top_score", "second_score", "margin",
+                "intent", "intent_downgraded"):
+        assert key in detail, "confidence_detail 缺 %s：%r" % (key, detail)

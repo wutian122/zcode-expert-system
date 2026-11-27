@@ -143,15 +143,15 @@ PSEUDO_TIE = [
 
 @pytest.mark.parametrize("text", PSEUDO_TIE)
 def test_same_category_multi_hit_is_not_a_tie(text):
-    """抓：hit_lengths 不去重导致同分类多次命中被误判为并列。
+    """同一分类命中多个关键词，不得被误判为跨分类并列。
 
-    缺陷表现：返回 conf=0.75（宣称"有并列"）但 alternatives=[]（宣称"无并列"），
-    返回值自相矛盾，且置信度被无故压低。
+    旧不变量「conf<1.0 必须有 alternatives」已随置信度契约更新：
+    现在 confidence 反映绝对证据 × margin，单弱词/多命中同分类都可能
+    conf<1.0 且 alternatives=[]。真正要守住的是 `tied` 不得为真。
     """
-    _cat, conf, alts = zes.classify_task_detailed(text)
-    assert not (conf < 1.0 and not alts), (
-        "「%s」返回 conf=%.3f 但 alternatives=[] —— 自相矛盾（伪并列）" % (text, conf)
-    )
+    _cat, _conf, alts, detail = zes.classify_task_with_evidence(text)
+    assert alts == [], "同一分类多次命中不应产生跨分类备选：%s" % alts
+    assert detail["tied"] is False, "同一分类多次命中不应被标成并列"
 
 
 def test_confidence_zero_implies_no_alternatives():

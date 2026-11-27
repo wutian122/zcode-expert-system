@@ -61,7 +61,8 @@ def _valid_subagent_types():
 
 def plan_for(task, **kw):
     r = wf.classify_scale(task, kw.get("files"))
-    return wf.build_dispatch_plan(task, scale=r, files=kw.get("files"))
+    return wf.build_dispatch_plan(
+        task, scale=r, files=kw.get("files"), root=kw.get("root", _PROJECT_ROOT))
 
 
 def _retry_remove(path, attempts=20, is_dir=False):
@@ -501,21 +502,19 @@ def test_a7_malformed_ledger_fails(tmp_path):
 # A9：readonly 顺序验收（锁 D6）
 # ---------------------------------------------------------------------------
 
-def test_a9_readonly_blocking_when_semantic_recheck_required(monkeypatch):
-    """readonly 路由返回 semantic_selection_required=True 时 plan 必含 blocking。
+def test_a9_readonly_semantic_recheck_action_present(monkeypatch):
+    """readonly 路由返回 semantic_selection_required=True 时 plan 必含复核动作。
 
-    D6 顺序契约：规模分诊 → 域路由 → 语义精判 blocking（复用现 661-676）→
-    readonly analyst 分支。旧实现 readonly 在域路由之前 early return，
-    monkeypatched 路由根本不会被调用、blocking 永不出现——恢复 early return
-    的变异（M2）会让本测试与 A2 双双变红。
-    monkeypatch 打在源模块 zcode_expert_system 的属性上（I5）。
+    D6 顺序契约：规模分诊 → 域路由 → 语义精判动作 → readonly analyst 分支。
+    高置信度不再制造 blocking（那会与 analyst 派发自相矛盾）；改为
+    orchestrator 的 semantic_recheck 动作。低置信度阻断由 P9 用例覆盖。
     """
     fake_route = {
         "category": "backend-architecture",
         "manager_id": "manager-backend-architecture",
         # ② 审查移交：夹具 expert 用真实专家名与真实 id（config/experts.json
         # 实核：软件架构师 / expert-engineering-software-architect）。
-        # A9 本身只断言 blocking、不断言该 expert——但它会触发 Task 2 的
+        # A9 本身只断言复核动作、不断言该 expert——但它会触发 Task 2 的
         # readonly analyst 派发与 dispatch.json 落盘，故 finally 段按 glob
         # 差集自清，防测试残留。
         "selected_expert": {"name": "软件架构师",
@@ -535,10 +534,15 @@ def test_a9_readonly_blocking_when_semantic_recheck_required(monkeypatch):
     before = set(glob.glob(os.path.join(sdd_root, "dispatch-*")))
     try:
         plan = plan_for("分析一下这个模块的架构")
-        assert plan.get("blocking"), (
-            "readonly 域路由返回 semantic_selection_required=True 时 plan 必含 "
-            "blocking（D6：语义精判 blocking 必须发生在 readonly 分支之前）——"
-            "缺 blocking 说明 readonly 分支仍抢在域路由/语义精判之前执行"
+        actions = [d.get("action") for d in plan["dispatches"]
+                   if d.get("role") == "orchestrator"]
+        assert "semantic_recheck" in actions, (
+            "readonly 语义精判未完成时 plan 必须有 semantic_recheck 动作；"
+            "实际 dispatches=%s"
+            % [(d.get("role"), d.get("action")) for d in plan["dispatches"]]
+        )
+        assert not plan.get("blocking"), (
+            "高置信度不得同时 blocking + 派发 analyst（自相矛盾）"
         )
     finally:
         # readonly expert 夹具会触发 dispatch.json 落盘：按 glob 差集自清
@@ -554,14 +558,14 @@ _ROLE_PREFIX_SENTINEL = "【任务 3 前缀哨兵】只读分析约束，禁止�
 
 
 def _result_files():
-    """用户级上下文存储里的 result-*.json 集合。
+    """本次测试的隔离上下文存储里的 result-*.json 集合。
 
-    context-manager.py 的 _default_store_dir() 把运行时数据放在
-    ~/.zcode/expert-system/context/（MAX_RESULT_FILES=200 自剪枝）——
-    断言用 glob 差集，只看「本次调用新写了什么」。
+    tests/conftest.py 为每个用例注入 ZCODE_EXPERT_CONTEXT_DIR；
+    若单独运行本文件而缺少该变量，则回退到默认宿主路径。
     """
-    store = os.path.join(os.path.expanduser("~"), ".zcode",
-                         "expert-system", "context")
+    store = os.environ.get("ZCODE_EXPERT_CONTEXT_DIR")
+    if not store:
+        pytest.skip("缺少 tests/conftest.py 的上下文隔离环境，拒绝读取真实 ~/.zcode")
     return set(glob.glob(os.path.join(store, "result-*.json")))
 
 

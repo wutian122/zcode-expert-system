@@ -1,6 +1,8 @@
 # ZCode 专家体系 · 融合设计基线
 
-> 版本：v3.1.0 ｜ 事实基线日期：2026-11-16
+> 版本：v3.2.6 ｜ 融合基线日期：2026-11-16 ｜ 宿主适配更新：2026-11-26
+> 适用范围：ZCode / Claude Code / Qoder Desktop。安装目录、命令命名与子代理派发名由宿主适配层处理；
+> 本文只描述三平台共用的两轴路由、九阶段门禁与证据体系。
 > 本文是九阶段工作流与门禁体系的**书面依据**（`SKILL.md` 与 `config/workflow.json` 引用它）。
 >
 > **权威顺序**：`config/workflow.json`（机器可读声明）> 本文（设计意图与取舍理由）> `SKILL.md`（操作说明）。
@@ -193,6 +195,7 @@ readonly 派 **analyst**（领域专家只读分析，四段式输出），不�
 
 | 曾考虑 | 否决理由 |
 |---|---|
+| 用 `PreToolUse` 钩子拦截主控直接改码 | 钩子看不到调用者身份（主控与子代理是同一类执行体），三宿主 hook 能力也不一致——同一门禁要写三份，缺一份就静默放行。**改为**：落盘派发证据 + `workflow_check` 事后机械核对（见第十节） |
 | 用外部 LLM/Embedding 做语义精判 | 插件运行在会话内，会话里的模型就是可用模型。再接外部 LLM 既重复又要凭据要花钱。**改为**：Python 只做词元粗筛并显式标注 `selection_basis=heuristic`，语义判断交主控 |
 | 把 30+ 条检查项文案外部化进 JSON（i18n 思路） | 会让现有按中文字面断言的测试全部失效，可读 diff 变成键值查找，收益仅为「文案可改」——本项目没有多语言需求 |
 | `decisions.md` 作为独立 ADR 账本 | 与计划文档 `## Rulings` 职责重叠，且后者已有产出方与机械校验。**改为**：收回对 `decisions.md` 的引用，统一指向 `## Rulings` |
@@ -211,8 +214,10 @@ readonly 派 **analyst**（领域专家只读分析，四段式输出），不�
 | 不许假绿 | SKIP 只剩一个合法含义「按声明不该查」（理由码 `inapplicable:`），其余一律 FAIL |
 | 不许静默 | 未裁剪阶段至少产出一条检查项（INV-R1），靠 `run()` 兜底而不依赖各检查器自觉 |
 | 不许拿「查不了」当放过 | 查不了 = FAIL，WARN 只表达「此刻不必成立」（INV-R3） |
+| 不许主控自兼实施者 | 完成态任务必须有 implementer 派发行，且 `agent` 是注册表专家（S5.DISPATCH_IMPLEMENTER） |
+| 不许主控自兼审查者 | `independence: L0` 必须有 reviewer 派发行，且与实施者非同一席专家（S6.REVIEWER_DIFFERENT_EXPERT） |
 | 不许 L2 交付 | `independence` 取**最坏值**（只能造成假红，不能造成假绿） |
-| 不许删证据 | P4 未导出禁止删 workspace |
+| 不许删证据 | P4 未导出禁止删 workspace；删账本本身判 FAIL（见第十节） |
 | 不许靠人记得 | 每个检查项有稳定 id；改了配置没同步代码，`--self-check` 当场报 drift |
 
 **最后一条尤其重要**：`workflow_check.py` 自己是验证工具，它坏了无法自证。
@@ -221,7 +226,56 @@ readonly 派 **analyst**（领域专家只读分析，四段式输出），不�
 
 ---
 
-## 十、已知边界
+## 十、派发证据门禁：为什么不是 PreToolUse
+
+**问题**：账本 `## Dispatches` 与计划 `## Review` 的 implementer / reviewer
+字段早就写在模板里，但早期 `workflow_check.py` 从不解析它们。后果是
+「主控在自己会话里改码、又自己审查」，只要在账本写一句 `independence: L0`
+就能拿完成态通过——证据链上没有一处机械拦截。
+
+**约束（本设计的硬边界）**：
+
+1. **主控不能兼实施者**。完成态任务必须有对应的 implementer 派发行，
+   且该行的 `agent` 必须是注册表内的专家。没有派发行 = 没有实施者，
+   「主控自己改码」不构成完成。
+2. **主控不能兼审查者**。`independence: L0` 必须有 reviewer 派发行；
+   reviewer 与 implementer 不得是**同一位注册表专家**（按注册表身份判定，
+   自述 `category` 改不动事实——否则改个分类就能把自审说成异域审查）。
+3. **主控是唯一状态写者**，但它写的是「谁做了什么」的记录，不是自我评价。
+   审查结论由异域专家给，主控只负责核验与落账。
+
+**为什么不在 `PreToolUse` 上拦？** 这是本文最需要留档的一次否决：
+
+| 方案 | 否决理由 |
+|---|---|
+| `PreToolUse` 钩子拦截写盘工具 | 钩子只看得到「某个工具调用」，看不到**调用者身份**。子代理与主控在宿主里是同一种执行体，钩子无法区分「主控自己写」与「implementer 子代理写」——拦截只能变成「一律禁止写盘」 |
+| 同上，改为按会话/进程区分 | 三宿主能力不一致：Qoder 只落 `UserPromptSubmit` 一个 Hook，Claude Code / ZCode 的钩子 schema 也各不相同。同一门禁要写三份宿主实现，且任何一份缺失就静默放行（假绿） |
+| 同上，改为阻断工具调用 | 阻断发生在**实施中途**，此时半成品已落盘；而证据门禁要回答的是「完成态是否可信」，属事后判定。中途阻断既救不回已写的内容，又会误伤只读调查 |
+| **落盘证据 + 事后机械核对（采用）** | 证据在产物里（账本派发行、brief、report、计划身份行），宿主无关、可离线复核、可 `--self-check` 自证。缺证据 = FAIL，而不是「拦不住就算了」 |
+
+**七项检查**（`scripts/workflow_check.py`，`tests/test_dispatch_evidence.py` 覆盖）：
+
+| 检查 id | 抓的破坏 |
+|---|---|
+| `S5.DISPATCH_IMPLEMENTER` | 完成的任务没有 implementer 派发行；派发行缺必需字段 |
+| `S5.DISPATCH_ORPHAN_REPORT` | 有 report 却没有对应派发行（来源不明）；派发行的 report 指向别的任务 |
+| `S5.IMPLEMENTER_IS_EXPERT` | 实施者不是注册表专家（含主控自称） |
+| `S6.REVIEWER_DISPATCH` | 声明 L0 却没有任何 reviewer 派发行 |
+| `S6.REVIEWER_DIFFERENT_EXPERT` | reviewer 与 implementer 是同一席专家；reviewer 不在注册表内 |
+| `S6.L0_REQUIRES_DISPATCH` | 声称 L0 独立审查，但账本无独立审查证据 |
+| `S6.REVIEW_IDENTITIES` | 计划 `## Review` 的身份行与账本派发行不一致（张冠李戴） |
+
+**两条附带的取舍**：
+
+- **删账本不算清理**。workspace 在、brief/report 在、`progress.md` 被删 →
+  直接 FAIL（`missing:ledger`）。否则「删掉记录」就是最省事的过门方式。
+- **适用面只对完成集执法**。workspace 整删（交付后按铁律清理）、未开工、
+  无账本 → `inapplicable:` SKIP。门禁不能靠「查不了」放过，也不该把
+  「还没开始」判成缺陷。
+
+---
+
+## 十一、已知边界
 
 诚实记录这套体系**做不到**什么：
 

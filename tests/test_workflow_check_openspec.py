@@ -55,6 +55,32 @@ def tmp_root():
     shutil.rmtree(str(d), ignore_errors=True)
 
 
+def test_expect_archive_checks_s2_in_archive_dir(tmp_root):
+    """F-5：归档后核验必须切到 archive 副本，S2.CHANGE_DIR 不得永久 FAIL。"""
+    change = "demo"
+    archived = tmp_root / "openspec" / "changes" / "archive" / ("2026-11-25-" + change)
+    for rel, content in {
+        "proposal.md": "## Why\nx\n",
+        "design.md": "## Design\nx\n",
+        "tasks.md": "- [x] 1.1 alpha\n",
+        "specs/auth/spec.md": "## Purpose\n认证能力\n\n## Requirements\n- 登录\n",
+        ".openspec.yaml": "name: demo\nstatus: archived\n",
+    }.items():
+        _write(archived, rel, content)
+
+    r = run_check(
+        "--change", change, "--scale", "medium", "--expect-archive",
+        "--root", str(tmp_root), "--json")
+    data = json.loads(r.stdout)
+    items = data["items"]
+    s2_dir = [i for i in items if i["id"] == "S2.CHANGE_DIR"]
+    assert s2_dir, "缺 S2.CHANGE_DIR 检查项"
+    assert s2_dir[0]["status"] == "OK", s2_dir[0]
+    assert "archive" in s2_dir[0]["detail"].replace("\\", "/")
+    s2_fails = [i for i in items if i["id"].startswith("S2") and i["status"] == "FAIL"]
+    assert not s2_fails, s2_fails
+
+
 # ---------- S2：规格产物存在性 ----------
 
 def test_check_S2_无CLI环境不误报(tmp_root):
