@@ -1,4 +1,4 @@
-# ZCode Expert System v3.2.5 - ZCode 专家体系
+# ZCode Expert System v3.2.6 - ZCode 专家体系
 
 [English](README.md) · **简体中文**
 
@@ -18,7 +18,7 @@
 
 ### 系统概述
 
-ZCode Expert System v3.2.5 是适配 ZCode、Claude Code 与 Qoder Desktop 的专家路由系统。它承载来自 [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents) 的 331 位专家完整人格提示词，并融合 **Superpowers 工程能力体系** 与 **OpenSpec 规格驱动开发体系**。插件采用**两轴正交路由**：
+ZCode Expert System v3.2.6 是适配 ZCode、Claude Code 与 Qoder Desktop 的专家路由系统。它承载来自 [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents) 的 331 位专家完整人格提示词，并融合 **Superpowers 工程能力体系** 与 **OpenSpec 规格驱动开发体系**。插件采用**两轴正交路由**：
 
 | 轴 | 回答问题 | 实现 |
 |---|---|---|
@@ -579,7 +579,7 @@ python -c "from zcode_expert_system import zcode_expert_system; print(zcode_expe
 python -m pytest tests/ -q   # 末行必须是 "passed"，0 failed
 ```
 
-期望基线：**817 passed, 1 skipped** —— 801 条是 v3.2.5 运行时基线
+期望基线：**817 passed, 1 skipped** —— 801 条是 v3.2.6 运行时基线
 （Claude 注册 + S1/P3 + 路由批次 1-4 + 派发门禁），另加 9 条三平台部署完整性
 守卫（workflow_check/categories 校验、marketplace 与 Qoder 技能组件、卸载对称性），
 再加 7 条安装/卸载安全守卫（`--zcode` 卸载保留含用户文件的备份、仅 `--purge`
@@ -627,4 +627,4 @@ python -m pytest tests/ -q   # 末行必须是 "passed"，0 failed
 
 ---
 
-**ZCode Expert System v3.2.5** - 让 AI 专家协作更智能 🚀
+**ZCode Expert System v3.2.6** - 让 AI 专家协作更智能 🚀

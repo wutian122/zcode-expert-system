@@ -1,6 +1,6 @@
 {
   "name": "zcode-expert-system",
-  "version": "3.2.5",
+  "version": "3.2.6",
   "description": "ZCode Expert System v3.2 - 331 experts in 32 categories with two-axis routing (scale -> nine-stage workflow, domain -> expert) for ZCode, Claude Code and Qoder Desktop. OpenSpec + Superpowers + multi-agent + TDD fusion.",
   "icon": "https://cdn.jsdelivr.net/gh/wutian122/zcode-expert-system@main/icon.png",
   "main": "bin/cli.js",

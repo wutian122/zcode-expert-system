@@ -1,4 +1,4 @@
-# ZCode Expert System v3.2.5
+# ZCode Expert System v3.2.6
 
 **English** · [简体中文](README_CN.md)
 
@@ -18,7 +18,7 @@ The same package deploys to all three hosts. ZCode reads `.zcode-plugin/` and `h
 
 ### System Overview
 
-ZCode Expert System v3.2.5 is an expert-routing system for ZCode, Claude Code, and Qoder Desktop. It ships the full persona prompts of **331 specialists** from [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents), fused with **Superpowers engineering discipline** and **OpenSpec spec-driven development**. The plugin uses **two-axis orthogonal routing**:
+ZCode Expert System v3.2.6 is an expert-routing system for ZCode, Claude Code, and Qoder Desktop. It ships the full persona prompts of **331 specialists** from [dsh-agency-agents](https://github.com/MichengAI/dsh-agency-agents), fused with **Superpowers engineering discipline** and **OpenSpec spec-driven development**. The plugin uses **two-axis orthogonal routing**:
 
 | Axis | Question | Implementation |
 |---|---|---|
@@ -689,7 +689,7 @@ Before opening the PR, make sure the full regression suite is green:
 python -m pytest tests/ -q   # must end with "passed", 0 failed
 ```
 
-Expected baseline: **817 passed, 1 skipped** — 801 runtime cases (v3.2.5 baseline:
+Expected baseline: **817 passed, 1 skipped** — 801 runtime cases (v3.2.6 baseline:
 Claude registration + S1/P3 + routing batches 1-4 + dispatch gate), plus 9
 deployment-integrity guards that pin the three-host runtime-component checks and
 uninstall symmetry, plus 7 install/uninstall safety guards added by the review
@@ -741,4 +741,4 @@ Questions or suggestions? Open a GitHub Issue.
 
 ---
 
-**ZCode Expert System v3.2.5** — smarter collaboration between AI experts 🚀
+**ZCode Expert System v3.2.6** — smarter collaboration between AI experts 🚀

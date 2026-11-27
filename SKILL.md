@@ -1,10 +1,10 @@
 ---
 name: zcode-expert-system
 description: Use when a task spans design, development, security, marketing, testing, research, finance, legal, healthcare or any other professional domain and needs routing to a specialist, or when the task is a software engineering task that needs a disciplined workflow (requirements → spec → plan → TDD → review → delivery). 331 experts in 32 top-level categories with two-axis routing (scale → workflow stages, domain → expert), nine-stage dev workflow with gates and evidence. Also use when the user says 专家 / 会诊 / 多专家 / 专业分析 / 任务路由 / 任务分解 / 工作流 / 研发流程.
-version: "3.2.5"
+version: "3.2.6"
 ---
 
-# ZCode Expert System v3.2.5
+# ZCode Expert System v3.2.6
 
 **运行平台**：ZCode / Claude Code / Qoder Desktop。宿主只影响安装目录与派发名格式，
 两轴路由、九阶段门禁证据链与 `/wf:*` 命令协议完全一致。

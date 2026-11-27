@@ -1,6 +1,6 @@
 {
   "$comment": "唯一声明源：九阶段的产物、门禁、证据级别只在此声明一次。SKILL.md / commands / workflow_check.py 三处消费，禁止各自手写。修改本文件即修改工作流定义。",
-  "version": "3.2.5",
+  "version": "3.2.6",
   "components": {
     "openspec": "规格真相源（应该做什么）",
     "superpowers": "工程纪律（按什么纪律做）",

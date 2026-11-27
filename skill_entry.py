@@ -114,7 +114,7 @@ def get_skill_info():
     """
     return {
         "name": "zcode-expert-system",
-        "version": "3.2.5",
+        "version": "3.2.6",
         "description": "ZCode 专家体系 v3 - 基于 dsh-agency-agents 的 331 位专家，三层路由架构：LLM 分类（32 个一级大类）→ 32 个领域总经理任务分解 → 331 位领域专家执行",
         "input": {
             "task_description": {
