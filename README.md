@@ -724,8 +724,8 @@ Released under the [MIT License](LICENSE).
 | 来源 | 用途 | 项目地址 |
 |---|---|---|
 | **dsh-agency-agents** | 331 位专家完整人格提示词（专家库来源） | https://github.com/MichengAI/dsh-agency-agents |
-| **Superpowers** | 工程能力体系（brainstorming、writing-plans、sdd、tdd、verification、code-review、finishing 等能力） | 待项目方补充 GitHub 地址 |
-| **OpenSpec** | 规格驱动开发体系（change 提案、规格同步、归档工作流） | 待项目方补充 GitHub 地址 |
+| **Superpowers** | 工程能力体系（brainstorming、writing-plans、sdd、tdd、verification、code-review、finishing 等能力） | https://github.com/obra/superpowers |
+| **OpenSpec** | 规格驱动开发体系（change 提案、规格同步、归档工作流） | https://github.com/Fission-AI/OpenSpec |
 
 本项目在此基础上增加了三平台适配与工程化改造：三层路由架构（分类 → 总经理 → 专家）、两轴正交路由（规模轴 + 域轴）、九阶段受控工作流、机械门禁核对、七态状态机、证据分级与冲突裁决。
 
